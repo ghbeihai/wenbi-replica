@@ -21,7 +21,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 PRESETS = REPO / "config" / "purpose_presets.yaml"
 FIELDS = ("purpose", "topic", "length", "audience", "tone", "format_notes", "extra", "relax",
-          "with_optional_format", "fewshot", "corpus_dir", "role")
+          "with_optional_format", "fewshot", "corpus_dir", "role", "plain_oral")
 FEWSHOT_RE = re.compile(r"【few-shot 示例】.*?(?=\n【|\Z)", re.S)
 
 
@@ -48,6 +48,8 @@ def add_args(ap):
     g.add_argument("--topic", help="题目/主题")
     g.add_argument("--length", type=int, help="目标字数")
     g.add_argument("--role", help="作者职业/身份（用户自填；进篇章框架与生成，覆盖笼统自称）")
+    g.add_argument("--plain-oral", dest="plain_oral", action="store_true", default=None,
+                    help="大众口语口播：少剂量/化验数字，短句、日常词、食物例子；专业主见保留")
     g.add_argument("--audience", help="目标读者")
     g.add_argument("--tone", help="语气/额外风格要求（用户自填，覆盖预设）")
     g.add_argument("--format-notes", help="格式说明（覆盖预设）")
@@ -80,6 +82,9 @@ def resolve(a, task=None) -> dict:
         sys.exit("错误：请给出写作题目（--topic）或写作任务（--task / --extra）。\n"
                  "生成前请先确定：用途/平台（--purpose）、字数（--length）、题目（--topic）、读者与其他要求。")
     spec.setdefault("fewshot", 3)
+    aud = str(spec.get("audience") or "")
+    if spec.get("plain_oral") is True or any(k in aud for k in ("大众", "普通人", "外行", "口语听众")):
+        spec["plain_oral"] = True
     return spec
 
 
@@ -89,6 +94,11 @@ def task_text(spec: dict) -> str:
         L.append(f"- 作者身份/职业（硬约束）：{spec['role']}")
         L.append("  （以此身份说话：专业服务者/照护者权威；可有棱角与主见，但不是局外喷子；"
                  "戳瞎补/噱头时，站在「我给你管营养方案」一侧）")
+    if spec.get("plain_oral"):
+        L.append("- 表达形态（大众口语硬约束）：用大白话短句，适合对着镜头念；"
+                 "讲清「做什么 / 为什么 / 别乱补什么」；"
+                 "尽量少写具体剂量、单位、化验临界值（如毫克、皮克/毫升、IU、血清××低于××）；"
+                 "专业感靠判断与框架，不靠数据堆砌；多用日常食物例子。")
     if spec.get("purpose"):
         L.append(f"- 用途/平台：{spec.get('name') or spec['purpose']}")
     if spec.get("topic"):

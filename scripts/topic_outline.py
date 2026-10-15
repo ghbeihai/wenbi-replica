@@ -66,13 +66,14 @@ def pack_persona(p: dict, edge: dict | None = None, role: str = "") -> str:
 
 
 def analyze(client, cfg, persona: dict, topic: str, purpose: str = "", extra: str = "",
-            edge: dict | None = None, role: str = "") -> dict:
+            edge: dict | None = None, role: str = "", plain_oral: bool = False) -> dict:
     edge = edge if edge is not None else edge_profile.build(persona)
     role = (role or persona.get("role") or persona.get("profession") or "").strip()
     user = (f"{pack_persona(persona, edge, role=role)}\n\n"
             f"【本题】{topic}\n"
             + (f"【作者身份/职业】{role}\n" if role else "")
             + (f"【用途/平台】{purpose}\n" if purpose else "")
+            + (("【大众口语】框架与尖锐主张用大白话；少写剂量/化验数字/单位；专业主见保留，靠判断不靠数据堆砌。\n") if plain_oral else "")
             + (f"【其他要求】{extra}\n" if extra else "")
             + "\n请输出完整篇章框架 JSON（不是条目清单）：\n"
             "{\n"
@@ -105,6 +106,7 @@ def analyze(client, cfg, persona: dict, topic: str, purpose: str = "", extra: st
     d["edge"] = edge
     d["frame"] = d.get("frame") or d.get("thesis_arc") or ""
     d["role"] = role
+    d["plain_oral"] = bool(plain_oral)
     return d
 
 
@@ -113,6 +115,8 @@ def outline_block(d: dict) -> str:
     L = ["【篇章框架 · 硬约束｜SPI+AoT 先导 · 解题思路+结构｜禁止流水账与平滑平均】"]
     if d.get("role"):
         L.append(f"- 作者身份：{d['role']}（专业照护权威；可硬可戳，勿变局外喷子）")
+    if d.get("plain_oral"):
+        L.append("- 大众口语：短句大白话；少剂量/化验临界值；食物例子；专业感靠判断与框架")
     L.append(f"- 鲜明立场：{d.get('stance', '')}")
     if d.get("thesis_arc"):
         L.append(f"- 解题弧线：{d['thesis_arc']}")
@@ -225,6 +229,7 @@ def main():
     ap.add_argument("--topic", required=True)
     ap.add_argument("--purpose", default="")
     ap.add_argument("--role", default="", help="作者职业/身份")
+    ap.add_argument("--plain-oral", action="store_true", help="大众口语框架（少剂量数字）")
     ap.add_argument("--extra", default="")
     ap.add_argument("--edge-config", help="edge_preserve.yaml")
     ap.add_argument("--out")
@@ -234,7 +239,8 @@ def main():
     edge = edge_profile.build(persona, edge_profile.load_cfg(a.edge_config))
     cfg = llm_common.load_llm_cfg(Path(WFP) / "config" / "llm.yaml")
     client = llm_common.make_client(llm_common.require_key(Path(WFP)), cfg)
-    d = analyze(client, cfg, persona, a.topic, a.purpose, a.extra, edge=edge, role=a.role)
+    d = analyze(client, cfg, persona, a.topic, a.purpose, a.extra, edge=edge, role=a.role,
+                plain_oral=a.plain_oral)
     d["topic"] = a.topic
     d["purpose"] = a.purpose
     if a.out:

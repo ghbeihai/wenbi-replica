@@ -159,6 +159,7 @@ python3 scripts/build_persona_generic.py --name <key> --display-name "人读名"
 | 字段 | 参数 | 说明 |
 |---|---|---|
 | 作者身份/职业 | `--role` | 用户自填；进框架与生成（专业照护权威，非局外喷子） |
+| 大众口语口播 | `--plain-oral` / `--audience 大众…` | 少剂量化验数字，短句大白话；专业主见靠判断 |
 | 用途/平台 | `--purpose` | 预设：口播稿 / 公众号文章 / 朋友圈 / 小红书图文 / 知乎回答 / 演讲稿 / custom（`config/purpose_presets.yaml`，可编辑） |
 | 题目 | `--topic` | 必填（或用 `--extra`/`--task` 自由描述） |
 | 字数 | `--length` | 不给则用预设默认 |

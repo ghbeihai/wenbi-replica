@@ -645,6 +645,13 @@ def _gen_config(tmp: Path, a_dir: Path, bl_path: Path, persona_md: Path):
     check(min(hist, key=_rank)["composite"] == 3.0, "选最佳：主尺棱角/依从优先于更低 WFP")
     role_txt = gen_spec.task_text({"role": "某领域专业营养师", "topic": "测", "purpose": "口播稿", "name": "口播"})
     check("作者身份/职业" in role_txt and "专业营养师" in role_txt, "生成配置 --role 进写作要求")
+    plain = gen_spec.task_text({"plain_oral": True, "topic": "测", "purpose": "口播稿", "name": "口播"})
+    check("大众口语" in plain and "剂量" in plain, "生成配置 --plain-oral 进写作要求")
+    class _A:
+        audience, plain_oral, purpose, topic, length, tone, format_notes, extra = "大众听众", None, "口播稿", "测", None, None, None, None
+        relax, with_optional_format, fewshot, corpus_dir, role, gen_config, presets = None, False, None, None, None, None, None
+    check(gen_spec.resolve(_A()).get("plain_oral") is True, "audience 含大众 → 自动 plain_oral")
+
 
 
     r = run([sys.executable, SCRIPT_DIR / "replicate.py", "--name", "nx", "--corpus-dir", a_dir, "--out-dir", tmp / "out_nx",

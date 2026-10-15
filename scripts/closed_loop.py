@@ -266,6 +266,8 @@ def main():
         notes.append(f"复用框架 {a.outline}")
         if spec.get("role"):
             outline["role"] = spec["role"]
+        if spec.get("plain_oral"):
+            outline["plain_oral"] = True
         if pj:
             persona_obj = topic_outline.load_persona(pj)
             if edge_cfg.get("enabled") and not outline.get("edge"):
@@ -286,7 +288,8 @@ def main():
             outline = topic_outline.analyze(client, cfg, persona_obj, spec.get("topic") or "",
                                            spec.get("name") or spec.get("purpose") or "",
                                            spec.get("extra") or "", edge=edge,
-                                           role=spec.get("role") or "")
+                                           role=spec.get("role") or "",
+                                           plain_oral=bool(spec.get("plain_oral")))
             outline["topic"] = spec.get("topic")
             if not outline.get("role"):
                 outline["role"] = spec.get("role") or persona_obj.get("role") or persona_obj.get("profession") or ""
