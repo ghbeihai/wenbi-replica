@@ -112,7 +112,12 @@ def run_wfp_hard(items, out_dir, name):
                 "sd": round(statistics.pstdev(vals), 4) if len(vals) > 1 else 0.0,
                 "n": len(vals),
             }
+    # 算每篇平均字数
+    chars_list = [r.get("chars", 0) for r in rows if r.get("chars")]
+    avg_chars = round(statistics.mean(chars_list), 0) if chars_list else 0
+
     out = {"n_docs": len(rows), "corpus": name, "version": "wenbi-replica-1.0",
+           "avg_chars": int(avg_chars),
            "note": "由文笔复刻1.0 replicate.py 聚合生成", "baseline": baseline}
     bl_path = os.path.join(out_dir, f"wfp_baseline_{name}.json")
     json.dump(out, open(bl_path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
