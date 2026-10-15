@@ -54,7 +54,7 @@ def validate(data: Any, schema: dict, name: str) -> None:
     if "cluster_summary_type" in schema and "cluster_summary" in data:
         cs = data["cluster_summary"]
         if not isinstance(cs, schema["cluster_summary_type"]):
-            errors.append(f"cluster_summary 应该是列表")
+            errors.append("cluster_summary 应该是列表")
         elif not cs:
             errors.append("cluster_summary 为空")
         else:
@@ -91,7 +91,7 @@ def validate(data: Any, schema: dict, name: str) -> None:
         print(f"\n[{name}] schema 校验失败：", file=sys.stderr)
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
-        print(f"\n请检查上游脚本是否跑通，不要静默跳过。", file=sys.stderr)
+        print("\n请检查上游脚本是否跑通，不要静默跳过。", file=sys.stderr)
         sys.exit(1)
 
 

@@ -37,11 +37,13 @@
   （数值特征：`chars / sentences / L1_SYN_001_avg_sl / L1_LEX_001_sttr100 / L1_SYN_004_question_sents / ...`）
 - 篇章级基线：`WFP/data/results/wfp_baseline_spi.json`
   ```json
-  {"n_docs": 431, "corpus": "spi", "version": "...", "baseline": {"L1_SYN_001_avg_sl": {"mean": 25.1, "sd": 8.2, "n": 431}, ...}}
+  {"n_docs": 431, "corpus": "spi", "version": "...", "avg_chars": 3800, "field_map_version": 2,
+   "baseline": {"L1_SYN_001_avg_sl": {"mean": 25.1, "sd": 8.2, "n": 431}, ...}}
   ```
+  Delta 口径字段由 `<WFP_ROOT>/scripts/field_map.py` 的 `flatten()` 统一生成（见 field_contract.md）。
 - L3 软画像基线：`WFP/data/results/l3_baseline.json`
   ```json
-  {"dimensions": {"D01": {"name": "互动", "mean": 6.51, ...}, ...}}
+  {"n_docs": 9, "n_dims": 17, "baseline": {"D01": {"dim_name": "互动", "mean": 6.51, "sd": 0.4, "n": 9}, ...}}
   ```
 - 块级七人基线：`WFP/data/results/wfp_baseline_people.json`
   ```json
@@ -82,7 +84,8 @@ python3 scripts/replicate.py --name <key> --corpus-dir <原文目录> [--limit N
 ## 四、依赖与环境
 
 - **API key**：<SPI_ROOT>/.env 与 <AoT_ROOT>/.env（`DEEPSEEK_API_KEY=sk-...`）；
-  WFP 的 L3 打分复用 AoT 的 `.env`。缺失时自动模拟模式（`simulated: true`）。
+  WFP 的 L3 打分复用 AoT 的 `.env`。环境变量 `DEEPSEEK_API_KEY` 优先于 `.env`；缺 key 时 L3/隐喻打分报错退出。
+  单项打分全部重试失败时记 `"score": null, "failed": true`（SPI 为 `failed: true`），不进基线/画像。
 - **SPI 安装**：`uv pip install -e <SPI_ROOT>`（提供 `spi-quant` CLI；未安装则跳过 SPI 画像）。
 - **Python 依赖**：`pyyaml`、`jieba`（四字格口径）、`numpy` 为 WFP 必需。
 - **词表**：`WFP/data/thuocl_chengyu.txt`（四字格口径词表，勿删）。
