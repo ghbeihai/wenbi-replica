@@ -9,3 +9,4 @@ data/
 out/
 *.json
 !references/**
+wenbi.env
