@@ -179,7 +179,7 @@ def build_prompt(persona, hard, l3, aot, spi, label_map=None):
             segs.append(s)
         for feat in ["我:你", "语气词/千字(块级)", "衔接词/千字(块级)", "问句/千字(块级)",
                      "话语标记/千字(块级)", "认知词/千字(块级)", "隐喻/千字(块级)",
-                     "正情/千字", "负情/千字", "四字格/千字", "问句/篇", "修辞反问/篇"]:
+                     "正情/千字", "负情/千字", "四字格/千字"]:
             if hard.get(feat) is not None:
                 segs.append(f"{feat}≈{hard[feat]}")
         parts.append("【数值约束】" + "；".join(segs) + "。")
