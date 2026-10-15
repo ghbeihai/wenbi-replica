@@ -16,7 +16,11 @@ description: 文笔复刻（Writing Style Replication）通用流水线：给定
 
 3. **Python 依赖**：首次运行前确保已安装 `jieba pyyaml numpy openai`，且 SPI 已 `pip install -e` 安装。
 
-**只有上述三项齐备，才进入正式流水线。** 提醒时一次性列清所有缺失项，不要跑一步报一个错。
+4. **SPI 的 Personality Atlas 数据仓库（必需，~1.1GB）**：检查 `$SPI_ROOT/assets/survey/results/spi_table.json` 是否存在。
+   - 不存在 → **提醒用户**："SPI 人格打分依赖 Personality Atlas 数据（约 1.1GB），首次使用需执行：`cd $SPI_ROOT/assets && git clone https://github.com/Wildertrek/survey.git`"
+   - 这是必需数据，不是可选对照；没有它 SPI 人格打分跑不了。
+
+**只有上述四项齐备，才进入正式流水线。** 提醒时一次性列清所有缺失项，不要跑一步报一个错。
 
 ---
 
