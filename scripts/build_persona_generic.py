@@ -163,7 +163,7 @@ def load_wfp(wfp_baseline, l3_baseline, people_baseline, people_key, l3_config):
             hard[name] = val
 
     l3 = {}
-    dims = (l3_baseline or {}).get("dimensions", {})
+    dims = (l3_baseline or {}).get("baseline", {})
     names = {}
     try:
         import yaml
