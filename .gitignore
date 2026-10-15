@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+*.key
+
+# 运行产物
+data/
+out/
+*.json
+!references/**
