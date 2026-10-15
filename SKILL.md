@@ -21,7 +21,7 @@ description: 文笔复刻（Writing Style Replication）通用流水线：给定
    - 这是必需数据，不是可选对照；没有它 SPI 人格打分跑不了。
 
 5. **SPI 的 3072 维嵌入数据（必需，~879MB）**：检查 `$SPI_ROOT/assets/hf-3072/Embeddings_3072/` 是否存在。
-   - 不存在 → **提醒用户**："SPI 因子映射需要 3072 维嵌入数据（约 879MB），下载到 `$SPI_ROOT/assets/hf-3072/`。"
+   - 不存在 → **提醒用户**："SPI 因子映射需要 3072 维嵌入数据（约 879MB），执行：`pip install huggingface_hub && huggingface-cli download Wildertrek/personality-atlas-3072 --repo-type dataset --local-dir $SPI_ROOT/assets/hf-3072`"
 
 **只有上述五项齐备，才进入正式流水线。** 提醒时一次性列清所有缺失项，不要跑一步报一个错。
 
