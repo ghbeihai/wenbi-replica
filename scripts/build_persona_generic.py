@@ -179,7 +179,7 @@ def build_prompt(persona, hard, l3, aot, spi, label_map=None):
             segs.append(s)
         for feat in ["我:你", "语气词/千字(块级)", "衔接词/千字(块级)", "问句/千字(块级)",
                      "话语标记/千字(块级)", "认知词/千字(块级)", "隐喻/千字(块级)",
-                     "正情/千字", "负情/千字", "四字格/千字"]:
+                     "正情/千字", "负情/千字", "四字格/千字", "问句/千字", "修辞反问/千字"]:
             if hard.get(feat) is not None:
                 if feat == "我:你":
                     segs.append(f"我:你比例{max(0.5, hard[feat]-1):.1f}-{hard[feat]+1:.1f}（目标 {hard[feat]}）")
