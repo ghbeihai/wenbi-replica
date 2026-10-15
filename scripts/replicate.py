@@ -102,13 +102,18 @@ def run_wfp_hard(items, out_dir, name):
     if not rows:
         print("错误：无有效文本可提取指纹。", file=sys.stderr)
         sys.exit(1)
-    # 先展开字典字段成标量（语气词/人称代词 → 总和）
+    # 先展开字典字段成标量（语气词/人称代词/隐喻根域 → 各子项独立字段）
     for r in rows:
         for k, v in list(r.items()):
             if isinstance(v, dict):
+                # 每个子项独立成字段
+                for sub_k, sub_v in v.items():
+                    if isinstance(sub_v, (int, float)):
+                        r[f"{k}__{sub_k}"] = sub_v
+                # 同时保留总和
                 r[f"{k}_total"] = sum(x for x in v.values() if isinstance(x, (int, float)))
 
-    keys = [k for k in rows[0] if isinstance(rows[0][k], (int, float)) and not k.endswith("_total") or k.endswith("_total")]
+    keys = [k for k in rows[0] if isinstance(rows[0][k], (int, float))]
     baseline = {}
     for k in keys:
         vals = [r[k] for r in rows if isinstance(r.get(k), (int, float)) and r[k] is not None]

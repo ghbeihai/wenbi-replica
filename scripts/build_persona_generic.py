@@ -174,6 +174,19 @@ def load_wfp(wfp_baseline, l3_baseline, people_baseline, people_key, l3_config):
         mean = v.get("mean") if isinstance(v, dict) else v
         if mean is not None:
             l3[names.get(k, k)] = round(float(mean), 2)
+
+    # 隐喻根域：从基线里读各根域密度，排名后输出
+    meta_domains = {}
+    for k, v in bl.items():
+        if k.startswith("L4_SUR_001_meta_domains__"):
+            domain = k.split("__")[1]
+            mean = v.get("mean", 0) if isinstance(v, dict) else v
+            if mean > 0:
+                meta_domains[domain] = mean
+    if meta_domains:
+        top_domains = sorted(meta_domains.items(), key=lambda x: -x[1])[:3]
+        hard["隐喻根域top3"] = "、".join(f"{d}({v}/千字)" for d, v in top_domains)
+
     return hard, l3
 
 
