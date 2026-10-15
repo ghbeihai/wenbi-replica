@@ -29,7 +29,7 @@ description: 文笔复刻（Writing Style Replication）通用流水线：给定
 
 ---
 
-# 文笔复刻 1.0
+# 文笔复刻
 
 三件套整合流水线：**SPI（他是谁）+ AoT（他怎么想）+ WFP（他怎么说）→ 人设卡 → 模仿文 → 回测校验**。
 

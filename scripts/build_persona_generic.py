@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-文笔复刻1.0 · 三件套人设卡合成（通用版）
+文笔复刻 · 三件套人设卡合成（通用版）
 SPI（他是谁）+ AoT（他怎么想）+ WFP（他怎么说）→ 标准化"人设卡"
 
 所有输入参数均可选：传了哪些画像，人设卡就合成哪些部分；全都不传则只产出骨架并提示。
@@ -214,7 +214,7 @@ def render_md(persona, hard, l3, aot, spi, prompt):
     add = A.append
     add(f"# 三件套人设卡 · {persona['display_name']}")
     add("")
-    add("> 合成：SPI（他是谁）+ AoT（他怎么想）+ WFP（他怎么说）→ 人设 prompt。文笔复刻1.0。")
+    add("> 合成：SPI（他是谁）+ AoT（他怎么想）+ WFP（他怎么说）→ 人设 prompt。文笔复刻。")
     add("")
     if spi:
         add("## 一、人格底色（SPI：他是谁）")

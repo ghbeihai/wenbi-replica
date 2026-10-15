@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-文笔复刻1.0 · 一键管线（通用版）
+文笔复刻 · 一键管线（通用版）
 原文目录 → WFP 硬指标基线 →（可选三件套画像）→ 人设卡 → 生成文回测
 
 用法：
@@ -116,9 +116,9 @@ def run_wfp_hard(items, out_dir, name):
     chars_list = [r.get("chars", 0) for r in rows if r.get("chars")]
     avg_chars = round(statistics.mean(chars_list), 0) if chars_list else 0
 
-    out = {"n_docs": len(rows), "corpus": name, "version": "wenbi-replica-1.0",
+    out = {"n_docs": len(rows), "corpus": name, "version": "wenbi-replica",
            "avg_chars": int(avg_chars),
-           "note": "由文笔复刻1.0 replicate.py 聚合生成", "baseline": baseline}
+           "note": "由文笔复刻 replicate.py 聚合生成", "baseline": baseline}
     bl_path = os.path.join(out_dir, f"wfp_baseline_{name}.json")
     json.dump(out, open(bl_path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
     print(f"[ok] 硬指标基线: {bl_path}（{len(rows)} 篇 / {len(baseline)} 特征）")
@@ -178,7 +178,7 @@ def run_backtest(gen_file, baseline_path, out_dir):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="文笔复刻1.0 一键管线")
+    ap = argparse.ArgumentParser(description="文笔复刻 一键管线")
     ap.add_argument("--name", required=True, help="对象标识（ASCII，如 alice）")
     ap.add_argument("--display-name", default="", help="人读名")
     ap.add_argument("--corpus-dir", help="原文目录或单个文本/语料 JSON")
