@@ -71,11 +71,11 @@ python3 scripts/replicate.py --name <对象key> --corpus-dir <原文目录> \
 - **SPI 人格**（需 DeepSeek key，`spi-quant` 已安装）：
   ```bash
   spi-quant profile --file <文章.txt> --out <profile.json>     # 逐篇打分
-  python3 $SPI_ROOT/scripts/reproduce_spi_clusters.py          # 聚类汇总 → spi_cluster_all.json
+  python3 $SPI_ROOT/scripts/reproduce_spi_clusters.py          # 聚类汇总 → $SPI_ROOT/assets/spi_item_clusters.json
   ```
 - **AoT 思维**（需 key）：
   ```bash
-  python3 $AOT_ROOT/scripts/score_dimensions.py --full        # → people_profiles.json（25维 top5）
+  python3 $AOT_ROOT/scripts/score_dimensions.py --full        # → 每人一个 {pid}.json（25维 top5），需自行汇总
   python3 $AOT_ROOT/scripts/score_criterion.py                 # → criterion_scores.json
   python3 $AOT_ROOT/scripts/score_thinking.py                  # → thinking_scores.json
   ```
