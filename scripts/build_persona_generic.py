@@ -291,6 +291,16 @@ def render_md(persona, hard, l3, aot, spi, prompt):
     add("")
     add("> 合成：SPI（他是谁）+ AoT（他怎么想）+ WFP（他怎么说）→ 人设 prompt。文笔复刻。")
     add("")
+    g = persona.get("genre") or {}
+    if g.get("genre"):
+        add(f"> 体裁：{g.get('genre_zh') or g['genre']}（基线只与同体裁文本比较）")
+        add("")
+    if persona.get("analysis_only"):
+        add("> ⚠️ **仅供分析（analysis_only）**：语料篇数不足或体裁混杂，以下数值约束与回测 Delta 不可靠，"
+            "不建议直接用于生成/冒名判断。")
+        for w in persona.get("warnings") or []:
+            add(f"> - {w}")
+        add("")
     if spi:
         add("## 一、人格底色（SPI：他是谁）")
         add("")
@@ -348,6 +358,10 @@ def main():
     ap.add_argument("--spi-label-map", help="SPI 聚类名→生成端表述 映射 JSON（可选，叠加在默认修正表上）")
     ap.add_argument("--l3-config", default=L3_CONFIG_DEFAULT, help="L3 维度名映射 yaml")
     ap.add_argument("--out-dir", default=".", help="输出目录（默认当前目录）")
+    ap.add_argument("--genre", help="基线所属体裁（replicate 体裁识别给出）")
+    ap.add_argument("--genre-zh", help="体裁中文名")
+    ap.add_argument("--analysis-only", action="store_true", help="语料闸门未通过：人设卡标注仅供分析")
+    ap.add_argument("--warning", action="append", default=[], help="写进人设卡的告警（可重复）")
     args = ap.parse_args()
 
     label_map = load_json(args.spi_label_map)
@@ -393,6 +407,9 @@ def main():
         "spi_personality": spi,
         "aot_thinking": aot,
         "wfp_style": {"hard": hard, "l3": l3},
+        "genre": {"genre": args.genre, "genre_zh": args.genre_zh} if args.genre else None,
+        "analysis_only": bool(args.analysis_only),
+        "warnings": args.warning,
     }
     os.makedirs(args.out_dir, exist_ok=True)
     persona_path = os.path.join(args.out_dir, f"persona_{args.name}.json")
@@ -403,6 +420,8 @@ def main():
     print(f"人读版：{md_path}")
     got = [k for k, v in [("SPI", spi), ("AoT", aot), ("WFP", hard or l3)] if v]
     print(f"已合成模块：{' + '.join(got)}")
+    if args.analysis_only:
+        print("[warn] 人设卡已标注 analysis_only（仅供分析）", file=sys.stderr)
 
 
 if __name__ == "__main__":
