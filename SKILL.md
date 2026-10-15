@@ -85,7 +85,7 @@ python3 scripts/replicate.py --name <对象key> --corpus-dir <原文目录> \
 **体裁闸门（默认 `--genre auto`）**：逐篇识别 讲稿/随笔/新闻/对话/诗歌/其他（规则；`--genre-llm` 对低置信篇再问 LLM）。
 主基线只用主体裁篇目；某体裁 < `--min-docs` 篇只做分析不建基线；主体裁占比 <60% 或没有够篇数的体裁 →
 人设卡标 **analysis_only（仅供分析）** 并显式告警，此时不要拿它生成/判冒名。回测与闭环自动选同体裁基线，找不到就告警"跨体裁不可靠"。
-`--genre off` 恢复旧行为（全部篇目一个基线）。
+`--genre off` 恢复旧行为（全部篇目一个基线）。用户声明整份语料同一体裁时用 `--genre-force lecture`（或 essay/…）+ `--genre-force-note "说明"`：跳过自动识别，全部进主基线，genre_report 记 forced=true。
 
 **缓存**：指纹、LLM 调用、基线都按内容哈希缓存（`$WENBI_CACHE_DIR`，默认 `~/.cache/wenbi`；`WENBI_NO_CACHE=1` 关闭），
 未变的文本不重算（343 篇建基线：首次 3m13s → 复跑 25s）。

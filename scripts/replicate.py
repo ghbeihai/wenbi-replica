@@ -26,6 +26,8 @@
     再问 LLM），按体裁分组：主基线 wfp_baseline_<name>.json 只用主体裁的篇目，另为每个达到 --min-docs 的体裁写
     wfp_baseline_<name>__<体裁>.json。体裁组过小或语料混杂 → 人设卡标注 analysis_only 并显式告警。
     回测自动识别生成文体裁并选同体裁基线。--genre off 恢复旧行为（全部篇目一个基线）。
+  - --genre-force <体裁>：用户声明整份语料同一体裁（如全部是在线讲课稿）时，跳过自动识别，全部标为该体裁并建主基线；
+    genre_report 记录 forced=true 与用户说明。
   - 缓存：单篇指纹按内容哈希缓存（extract_hard_metrics）；基线记录 input_hash，输入不变时直接复用。
 """
 import hashlib
@@ -192,15 +194,31 @@ def detect_genres(items, use_llm=False):
     return {str(d): genre_mod.classify(t, use_llm=use_llm, _ctx=ctx) for d, t in items}
 
 
-def run_wfp_hard(items, out_dir, name, min_docs=5, genre="auto", genre_llm=False):
-    """→ (主基线路径, 闸门信息)。genre=auto 时按体裁分组建基线。"""
+def run_wfp_hard(items, out_dir, name, min_docs=5, genre="auto", genre_llm=False, genre_force=None, genre_force_note=None):
+    """→ (主基线路径, 闸门信息)。genre=auto 时按体裁分组建基线；genre_force 时整份标为该体裁。"""
     os.makedirs(out_dir, exist_ok=True)
     rows = extract_all(items, out_dir, name)
-    if genre == "off":
+    if genre == "off" and not genre_force:
         return build_baseline(rows, out_dir, f"wfp_baseline_{name}.json", name, min_docs), None
     texts = dict((str(d), t) for d, t in items)
-    labels = detect_genres([(r["doc_id"], texts.get(str(r["doc_id"]), "")) for r in rows], genre_llm)
-    g = genre_mod.gate({d: v["genre"] for d, v in labels.items()}, min_docs=min_docs)
+    if genre_force:
+        if genre_force not in genre_mod.GENRES:
+            print(f"错误：--genre-force 未知体裁「{genre_force}」，可选：{'、'.join(genre_mod.GENRES)}", file=sys.stderr)
+            sys.exit(1)
+        labels = {str(r["doc_id"]): {"genre": genre_force, "confidence": 1.0, "method": "user_force",
+                                     "note": genre_force_note or "用户声明整份语料同一体裁"} for r in rows}
+        g = genre_mod.gate({d: v["genre"] for d, v in labels.items()}, min_docs=min_docs)
+        g["forced"] = True
+        g["force_genre"] = genre_force
+        g["force_note"] = genre_force_note or "用户声明整份语料同一体裁"
+        print(f"[ok] 体裁强制为「{genre_mod.GENRE_ZH.get(genre_force, genre_force)}」（用户声明）：{len(rows)} 篇全部计入主基线",
+              file=sys.stderr)
+        if genre_force_note:
+            print(f"[ok] 说明：{genre_force_note}", file=sys.stderr)
+    else:
+        labels = detect_genres([(r["doc_id"], texts.get(str(r["doc_id"]), "")) for r in rows], genre_llm)
+        g = genre_mod.gate({d: v["genre"] for d, v in labels.items()}, min_docs=min_docs)
+        g["forced"] = False
     g["per_doc"] = labels
     g["per_genre_baselines"] = {}
     for w in g["warnings"]:
@@ -215,15 +233,17 @@ def run_wfp_hard(items, out_dir, name, min_docs=5, genre="auto", genre_llm=False
             g["per_genre_baselines"][gn] = p
     dom = g["dominant"]
     if dom in g["per_genre_baselines"]:
-        main_bl = build_baseline(by[dom], out_dir, f"wfp_baseline_{name}.json", name, min_docs, meta={"genre": dom})
-    else:  # 没有可用体裁组：退回全部篇目，但标 analysis_only
+        main_bl = build_baseline(by[dom], out_dir, f"wfp_baseline_{name}.json", name, min_docs,
+                                 meta={"genre": dom, "genre_forced": bool(genre_force)})
+    else:
         main_bl = build_baseline(rows, out_dir, f"wfp_baseline_{name}.json", name, min_docs,
                                  meta={"genre": "mixed"})
-    g["analysis_only"] = g["status"] != "ok"
+    g["analysis_only"] = g["status"] != "ok" and not genre_force
     g["main_genre"] = dom if dom in g["per_genre_baselines"] else "mixed"
     json.dump(g, open(os.path.join(out_dir, "genre_report.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=2)
     dist = "、".join(f"{genre_mod.GENRE_ZH.get(k, k)} {len(v)}" for k, v in sorted(g["groups"].items(), key=lambda kv: -len(kv[1])))
-    print(f"[ok] 体裁分布：{dist}（闸门 {g['status']}，主体裁 {genre_mod.GENRE_ZH.get(g['main_genre'], g['main_genre'])}）")
+    tag = "强制" if genre_force else f"闸门 {g['status']}"
+    print(f"[ok] 体裁分布：{dist}（{tag}，主体裁 {genre_mod.GENRE_ZH.get(g['main_genre'], g['main_genre'])}）")
     return main_bl, g
 
 
@@ -321,6 +341,9 @@ def main():
     ap.add_argument("--genre", choices=["auto", "off"], default="auto",
                     help="体裁识别与按体裁分组基线（默认 auto；off=全部篇目一个基线）")
     ap.add_argument("--genre-llm", action="store_true", help="规则置信度 <0.7 的篇目再用 LLM 判体裁（需 key）")
+    ap.add_argument("--genre-force", choices=["lecture", "essay", "news", "dialogue", "poetry", "other"],
+                    help="用户声明整份语料同一体裁：跳过自动识别，全部标为该体裁并建主基线（如全部是在线讲课稿）")
+    ap.add_argument("--genre-force-note", default="", help="写入 genre_report 的用户说明（配合 --genre-force）")
     args = ap.parse_args()
 
     out_dir = args.out_dir or os.path.join("data", "results", args.name)
@@ -335,7 +358,8 @@ def main():
         if args.wfp_baseline:
             print("[warn] 同时给了 --corpus-dir 与 --wfp-baseline：使用语料新建的基线", file=sys.stderr)
         bl, gate_info = run_wfp_hard(items, out_dir, args.name, min_docs=args.min_docs,
-                                     genre=args.genre, genre_llm=args.genre_llm)
+                                     genre=args.genre, genre_llm=args.genre_llm,
+                                     genre_force=args.genre_force, genre_force_note=args.genre_force_note or None)
     elif args.wfp_baseline:
         if not os.path.exists(args.wfp_baseline):
             print(f"错误：--wfp-baseline 文件不存在 {args.wfp_baseline}", file=sys.stderr)

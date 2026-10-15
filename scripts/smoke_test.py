@@ -12,7 +12,7 @@ Smoke test：用仓库内小样例（tests/fixtures/smoke，合成语料）端�
  6. iterative_generate（人读标签）、build_l3_baseline（含失败分过滤、空目录报错）
  7. 边界：单篇/空文本/退化基线报错、无 jieba 告警被转发、--summary 与 replicate 基线逐项相同、
     手动两关、自动模式 seed 可复现 + 基线重叠剔除
- 9. v3opt：体裁识别 + 语料闸门 + 同体裁回测；指纹/LLM/基线缓存命中；ruler extend/learn/score + 隐喻并入；
+ 9. v3opt：体裁识别 + --genre-force + 语料闸门 + 同体裁回测；指纹/LLM/基线缓存命中；ruler extend/learn/score + 隐喻并入；
     validate_discrimination --weights；LLM 盲测尺（mock）；生成闭环 closed_loop（mock，≤3 轮、保留最佳）
  8. 离线 mock LLM（WENBI_MOCK_LLM=flaky，首个请求 429 → 退避重试）：L3 score_stylistics + --l3-baseline-out、
     score_metaphor、SPI spi-quant spi/profile + aggregate_spi_profiles、AoT prepare_corpus + score_dimensions +
@@ -395,6 +395,26 @@ def _v3opt(tmp: Path, a_dir: Path, b_dir: Path, bl_path: Path):
     mdt = (tmp / "out_tiny" / "三件套人设卡_t.md").read_text(encoding="utf-8")
     check(pt["analysis_only"] and "analysis_only" in mdt and "analysis_only" in r.stderr,
           "体裁组过小/混杂 → 人设卡 analysis_only + 显式告警")
+    # --genre-force：用户声明整份语料同一体裁，跳过自动识别
+    of = tmp / "out_force"
+    r = run([sys.executable, SCRIPT_DIR / "replicate.py", "--name", "f", "--corpus-dir", a_dir, "--out-dir", of,
+             "--genre-force", "lecture", "--genre-force-note", "用户声明：全部是在线讲课稿"])
+    gf = json.loads((of / "genre_report.json").read_text(encoding="utf-8"))
+    bf = json.loads((of / "wfp_baseline_f.json").read_text(encoding="utf-8"))
+    check(gf.get("forced") and gf["force_genre"] == "lecture" and gf["main_genre"] == "lecture"
+          and bf.get("genre") == "lecture" and bf["n_docs"] == len(list(a_dir.glob("*.txt")))
+          and "用户声明" in r.stderr and "讲座" in (of / "三件套人设卡_f.md").read_text(encoding="utf-8"),
+          f"replicate --genre-force lecture：全部 {bf['n_docs']} 篇进主基线，genre_report.forced=true")
+    # --genre-force：用户声明整份语料同一体裁，跳过自动识别
+    of = tmp / "out_force"
+    r = run([sys.executable, SCRIPT_DIR / "replicate.py", "--name", "f", "--corpus-dir", a_dir, "--out-dir", of,
+             "--genre-force", "lecture", "--genre-force-note", "用户声明：全部是在线讲课稿"])
+    gf = json.loads((of / "genre_report.json").read_text(encoding="utf-8"))
+    bf = json.loads((of / "wfp_baseline_f.json").read_text(encoding="utf-8"))
+    check(gf.get("forced") and gf["force_genre"] == "lecture" and gf["main_genre"] == "lecture"
+          and bf.get("genre") == "lecture" and bf["n_docs"] == len(list(a_dir.glob("*.txt")))
+          and "用户声明" in r.stderr and "讲座" in (of / "三件套人设卡_f.md").read_text(encoding="utf-8"),
+          f"replicate --genre-force lecture：全部 {bf['n_docs']} 篇进主基线，genre_report.forced=true")
     # 基线缓存：同输入复用
     r = run([sys.executable, SCRIPT_DIR / "replicate.py", "--name", "g", "--corpus-dir", mix, "--out-dir", og])
     check("复用" in r.stdout, "基线 input_hash 未变 → 复用")
