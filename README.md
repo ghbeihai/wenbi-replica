@@ -71,7 +71,7 @@ python3 scripts/replicate.py --name alice --wfp-baseline ./out/wfp_baseline_alic
   --spi-clusters spi_cluster_all.json --aot-profiles people_profiles.json --aot-person 爱丽丝 \
   --l3-baseline l3_baseline.json --out-dir ./out --backtest 生成文.txt
 
-# 6. 训练完成后先定用途，再生成（SPI+AoT 先出思维大纲，WFP 只管表层）
+# 6. 训练完成后先定用途，再生成（SPI+AoT 先出篇章框架+棱角，主尺=依从/棱角/结构，WFP 次尺；见 config/edge_preserve.yaml）
 # 6b. 训练完成后先定 用途/平台、字数、题目（预设：python3 scripts/wenbi.py presets），再闭环生成
 #    （生成 → 多尺子打分 → 分层偏差回灌 → 再生成，≤3 轮，保留最佳；与平台形态冲突的偏差只报告不强制改）
 python3 scripts/closed_loop.py --persona-md ./out/三件套人设卡_alice.md \

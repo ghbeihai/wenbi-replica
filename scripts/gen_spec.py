@@ -109,12 +109,14 @@ def _bigrams(t):
     return {t[i:i + 2] for i in range(len(t) - 1)}
 
 
-def pick_fewshot(corpus_dir, spec, n=3, seed=42):
-    """从作者原文挑 n 段（每篇最多 1 段）：优先 genre_pref 体裁，其次与题目字面重合多的段落。"""
+def pick_fewshot(corpus_dir, spec, n=3, seed=42, prefer_edge=True):
+    """从作者原文挑 n 段：优先棱角段（判断/反问/强硬），再 genre_pref，再题目重合。"""
     if not corpus_dir or n <= 0:
         return []
     sys.path.insert(0, os.path.join(os.environ.get("WFP_ROOT", ""), "scripts"))
     import genre as genre_mod
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import edge_profile
     p = Path(corpus_dir)
     files = [p] if p.is_file() else sorted(f for f in p.iterdir() if f.suffix.lower() in (".txt", ".md"))
     want = spec.get("genre_pref") or ""
@@ -129,10 +131,16 @@ def pick_fewshot(corpus_dir, spec, n=3, seed=42):
         paras = [x.strip() for x in t.split("\n") if 80 <= len(x.strip()) <= 300]
         if not paras:
             continue
-        best = max(paras, key=lambda x: (len(_bigrams(x) & topic), rng.random()))
-        cands.append(((g == want) if want else 0, len(_bigrams(best) & topic), rng.random(), f.stem, g, best))
+        def _key(x):
+            edge_sc = edge_profile.edge_score_text(x)["score"] if prefer_edge else 0
+            # 段内：题目重合优先，其次棱角（同篇只取一段）
+            return (len(_bigrams(x) & topic), edge_sc, rng.random())
+        best = max(paras, key=_key)
+        es = edge_profile.edge_score_text(best)["score"] if prefer_edge else 0
+        # 跨篇：体裁匹配优先，再棱角，再题目重合
+        cands.append(((g == want) if want else 0, es, len(_bigrams(best) & topic), rng.random(), f.stem, g, best))
     cands.sort(reverse=True)
-    return [{"doc_id": c[3], "genre": c[4], "text": c[5]} for c in cands[:n]]
+    return [{"doc_id": c[4], "genre": c[5], "text": c[6], "edge_score": c[1]} for c in cands[:n]]
 
 
 def apply_fewshot(prompt: str, shots: list) -> str:

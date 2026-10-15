@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-文笔复刻 · 生成闭环（SPI+AoT 先导，WFP 表层）
+文笔复刻 · 生成闭环（SPI+AoT 先导 · 棱角保留，WFP 表层次尺）
 顺序硬规则：
-  1) 就本题用 SPI+AoT 产出思维大纲（硬约束）
-  2) 再按人设卡表层数值（WFP）落成文字
-  3) 每轮：先评 SPI/AoT 依从（主尺），再评 WFP 综合分（次尺）；回灌时思维偏离优先于文风数值
-选最佳：优先 SPI/AoT 依从分（越高越好），同分再比 WFP 综合分（越低越好）。
+  1) 棱角画像 + SPI+AoT 产出「解题思路+篇章结构」全框架（硬约束，防流水账）
+  2) 再用 WFP 表层数值落成文字；不得用文风分把棱角拉回均值
+  3) 每轮主尺：思维依从 + 棱角保留 + 结构连贯；次尺 WFP（仅报告/轻回灌）
+选最佳：主尺（依从、棱角、结构）越高越好；同分再比 WFP 综合分（越低越好）。
 
 用法（用途/平台、字数、题目等由用户在生成时决定）：
   python3 scripts/closed_loop.py --persona-md 三件套人设卡_alice.md --baseline wfp_baseline_alice.json \\
@@ -21,8 +21,8 @@
   --l3-baseline：每轮 WFP L3 软评分（次尺）；--no-adhere 关闭思维依从评审（不推荐）
   （或用 --prompt-file；--task 仍可用）
 
-产物：outline.json、round_*.txt、loop_report.*、best.txt
-  - 主尺：SPI/AoT 依从分 1–7；次尺：WFP ruler 综合分。需要 DeepSeek key（或 WENBI_MOCK_LLM=1）。
+产物：outline.json、edge_profile.json、round_*.txt、loop_report.*、best.txt
+  - 主尺：依从/棱角/结构 1–7；次尺：WFP。需要 DeepSeek key（或 WENBI_MOCK_LLM=1）。
 """
 import argparse
 import json
@@ -45,11 +45,13 @@ import llm_common  # noqa: E402
 import ruler  # noqa: E402
 import gen_spec  # noqa: E402
 import topic_outline  # noqa: E402
+import edge_profile  # noqa: E402
 
 EXTRACT = os.path.join(WFP_SCRIPTS, "extract_hard_metrics.py")
 MAX_ROUNDS = 3
-SYS = ("你是文笔复刻写作者。必须先按【思维大纲】立意与拆解（SPI+AoT），"
-       "再用【表层说法】约束句式与用词（WFP）；大纲优先于数值。"
+SYS = ("你是文笔复刻写作者。必须先按【篇章框架】的解题思路与分节主见写（SPI+AoT），"
+       "保留棱角与鲜明主张，禁止磨成中庸平均稿或流水账；"
+       "再用【表层说法】约束句式与用词（WFP）；框架与棱角优先于数值，不得为文风分删棱角。"
        "只输出正文，不要解释。")
 
 
@@ -130,21 +132,31 @@ def feedback(vec, baseline, sc, weights, top=6, relax=()) -> list:
     return out
 
 
-def revise(base_prompt: str, task: str, fb: list, sc: dict, prev_text: str, adhere=None) -> str:
-    """回灌：先思维依从（SPI+AoT），再表层文风（WFP）。"""
+def revise(base_prompt: str, task: str, fb: list, sc: dict, prev_text: str, adhere=None, edge=None) -> str:
+    """回灌：先依从/棱角/结构（SPI+AoT），再表层文风（WFP，不得拉回均值）。"""
     lines = [base_prompt, "", task, ""]
     if adhere:
-        lines.append(f"【上一稿思维依从 · SPI+AoT 主尺】得分 {adhere.get('score')}/7：{adhere.get('summary') or ''}")
+        lines.append(f"【上一稿思维依从 · 主尺】{adhere.get('score')}/7｜结构 {adhere.get('structure_score', '—')}/7："
+                     f"{adhere.get('summary') or ''}")
         if adhere.get("misses"):
-            lines.append("- 偏离/遗漏：" + "；".join(str(x) for x in adhere["misses"]))
+            lines.append("- 偏离/流水账：" + "；".join(str(x) for x in adhere["misses"]))
         if adhere.get("fix_hints"):
-            lines.append("- 改回想路：" + "；".join(str(x) for x in adhere["fix_hints"]))
+            lines.append("- 改回想路与结构：" + "；".join(str(x) for x in adhere["fix_hints"]))
         if adhere.get("hits"):
             lines.append("- 已对齐（保持）：" + "；".join(str(x) for x in adhere["hits"][:3]))
-        lines.append("（先把上面的思路改对，再动文风数值。）")
+        lines.append("")
+    if edge and edge.get("score") is not None:
+        lines.append(f"【上一稿棱角保留 · 主尺】{edge.get('score')}/7：{edge.get('summary') or ''}")
+        if edge.get("smoothed"):
+            lines.append("- 被磨平：" + "；".join(str(x) for x in edge["smoothed"]))
+        if edge.get("fix_hints"):
+            lines.append("- 写利主见：" + "；".join(str(x) for x in edge["fix_hints"]))
+        if edge.get("kept_edges"):
+            lines.append("- 已保留的棱角（保持）：" + "；".join(str(x) for x in edge["kept_edges"][:3]))
+        lines.append("（先把思路、结构、棱角改对；文风数值不得用来删棱角。）")
         lines.append("")
     worst = sorted(sc["layers"].items(), key=lambda kv: -kv[1]["score"])[:2]
-    lines.append("【上一稿表层文风 · WFP 次尺】（不得用这些数值推翻思维大纲）")
+    lines.append("【上一稿表层文风 · WFP 次尺】（不得推翻篇章框架，不得为分磨平主见）")
     lines += ["- 偏离最大的层：" + "、".join(f"{v['label']}（{v['score']}）" for _, v in worst)]
     lines += [f"- {f['text']}" for f in fb if not f.get("relaxed")] or ["- （无显著表层偏差）"]
     lines += ["", "【上一稿开头（供参考，不要照抄，重写全文）】", prev_text[:300]]
@@ -190,6 +202,11 @@ def main():
     ap.add_argument("--outline", help="已有 outline.json，跳过再分析")
     ap.add_argument("--skip-outline", action="store_true", help="不做 SPI+AoT 先导（不推荐；仅调试）")
     ap.add_argument("--no-adhere", action="store_true", help="不跑思维依从评审（不推荐）")
+    ap.add_argument("--edge-preserve", dest="edge_preserve", action="store_true", default=None,
+                    help="开启棱角保留（默认读 config/edge_preserve.yaml）")
+    ap.add_argument("--no-edge-preserve", dest="edge_preserve", action="store_false",
+                    help="关闭棱角保留")
+    ap.add_argument("--edge-config", help="棱角配置 yaml（默认 config/edge_preserve.yaml）")
     gen_spec.add_args(ap)
     a = ap.parse_args()
     spec = gen_spec.resolve(a, a.task)
@@ -221,7 +238,11 @@ def main():
     for n_ in notes:
         print(f"[note] {n_}", file=sys.stderr)
     relax = spec.get("relax") or []
-    shots = gen_spec.pick_fewshot(spec.get("corpus_dir"), spec, int(spec.get("fewshot", 3)))
+    edge_cfg = edge_profile.load_cfg(a.edge_config)
+    if a.edge_preserve is not None:
+        edge_cfg["enabled"] = bool(a.edge_preserve)
+    prefer_edge = bool(edge_cfg.get("fewshot_prefer_edge", True)) and bool(edge_cfg.get("enabled", True))
+    shots = gen_spec.pick_fewshot(spec.get("corpus_dir"), spec, int(spec.get("fewshot", 3)), prefer_edge=prefer_edge)
     if not shots and int(spec.get("fewshot", 3)) > 0:
         print("[warn] 没给 --corpus-dir（作者原文），不放 few-shot 示例；建议提供以便模仿用词与语气", file=sys.stderr)
     base_prompt = gen_spec.apply_fewshot(base_prompt, shots)
@@ -229,7 +250,10 @@ def main():
     max_tokens = a.max_tokens or max(2048, int(spec.get("length") or 1000) * 2)
 
     cfg = llm_common.load_llm_cfg(Path(WFP) / "config" / "llm.yaml")
-    temp = a.temperature if a.temperature is not None else float(cfg.get("generation_temperature", 0.8))
+    # 棱角模式默认抬高温度（扩大样本空间）；CLI --temperature 仍优先
+    default_temp = float(edge_cfg.get("generation_temperature") or cfg.get("generation_temperature", 0.8)) \
+        if edge_cfg.get("enabled", True) else float(cfg.get("generation_temperature", 0.8))
+    temp = a.temperature if a.temperature is not None else default_temp
     client = llm_common.make_client(llm_common.require_key(Path(WFP)), cfg)
 
     # —— SPI+AoT 先导：本题思维大纲 ——
@@ -239,9 +263,11 @@ def main():
         notes.append("已 --skip-outline：无 SPI+AoT 先导（不推荐）")
     elif a.outline:
         outline = json.loads(Path(a.outline).read_text(encoding="utf-8"))
-        notes.append(f"复用大纲 {a.outline}")
+        notes.append(f"复用框架 {a.outline}")
         if pj:
             persona_obj = topic_outline.load_persona(pj)
+            if edge_cfg.get("enabled") and not outline.get("edge"):
+                outline["edge"] = edge_profile.build(persona_obj, edge_cfg)
     elif pj:
         try:
             persona_obj = topic_outline.load_persona(pj)
@@ -250,13 +276,17 @@ def main():
             notes.append(str(e))
             persona_obj = None
         if persona_obj:
-            print(f"[ok] SPI+AoT 先导：就本题分析思维大纲（人设 {pj}）…", file=sys.stderr)
+            edge = edge_profile.build(persona_obj, edge_cfg)
+            Path(a.out_dir, "edge_profile.json").write_text(
+                json.dumps(edge, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(f"[ok] SPI+AoT 先导：篇章框架+棱角（人设 {pj}；棱角={'开' if edge.get('enabled') else '关'}）…",
+                  file=sys.stderr)
             outline = topic_outline.analyze(client, cfg, persona_obj, spec.get("topic") or "",
                                            spec.get("name") or spec.get("purpose") or "",
-                                           spec.get("extra") or "")
+                                           spec.get("extra") or "", edge=edge)
             outline["topic"] = spec.get("topic")
             Path(a.out_dir, "outline.json").write_text(json.dumps(outline, ensure_ascii=False, indent=2), encoding="utf-8")
-            print(f"[ok] 大纲 → {a.out_dir}/outline.json｜立场：{outline.get('stance', '')[:60]}", file=sys.stderr)
+            print(f"[ok] 框架 → {a.out_dir}/outline.json｜立场：{outline.get('stance', '')[:60]}", file=sys.stderr)
     else:
         print("[warn] 找不到 persona_*.json，无法做 SPI+AoT 先导；请给 --persona-json。"
               "本轮仅 WFP 表层（质量会明显变差）", file=sys.stderr)
@@ -301,43 +331,66 @@ def main():
         if genre_note:
             fb.insert(0, {"feature": "genre", "label": "体裁", "layer": "", "value": genre_note["genre"],
                           "target": genre_note["target"], "z": None, "text": genre_note["text"]})
-        adhere = None
+        adhere, edge_j = None, None
         if outline and persona_obj and not a.no_adhere:
             try:
                 adhere = topic_outline.judge_adherence(client, cfg, persona_obj, outline, text)
             except Exception as e:  # noqa: BLE001
                 print(f"[warn] 第 {k} 轮思维依从评审失败：{e}", file=sys.stderr)
                 adhere = {"score": None, "error": str(e)[:120]}
+        if outline and persona_obj and edge_cfg.get("enabled") and not a.no_adhere:
+            try:
+                edge_j = topic_outline.judge_edge(client, cfg, persona_obj, outline, text)
+            except Exception as e:  # noqa: BLE001
+                print(f"[warn] 第 {k} 轮棱角评审失败：{e}", file=sys.stderr)
+                edge_j = {"score": edge_profile.edge_score_text(text)["score"], "error": str(e)[:120]}
         hist.append({"round": k, "file": tp, "genre_mismatch": genre_note, "same_genre_baseline_composite": alt_comp,
                      "composite": sc["composite"], "n_features": sc["n"],
                      "layers": {n: {"label": v["label"], "score": v["score"]} for n, v in sc["layers"].items()},
                      "feedback": fb, "relaxed_deviations": [f["text"] for f in fb if f.get("relaxed")],
-                     "l3_scored": bool(l3), "adherence": adhere, "prompt_chars": len(prompt)})
+                     "l3_scored": bool(l3), "adherence": adhere, "edge": edge_j, "prompt_chars": len(prompt)})
         ad_s = (adhere or {}).get("score")
-        print(f"[round {k}] 思维依从 {ad_s}/7（主）｜WFP 综合 {sc['composite']}（次，{sc['n']} 特征）| "
+        eg_s = (edge_j or {}).get("score")
+        st_s = (adhere or {}).get("structure_score")
+        print(f"[round {k}] 依从 {ad_s}/7｜棱角 {eg_s}/7｜结构 {st_s}/7（主）｜WFP {sc['composite']}（次，{sc['n']} 特征）| "
               + " | ".join(f"{v['label']} {v['score']}" for v in sc["layers"].values()))
         if k < rounds:
             body = "\n".join([x for x in ([outline_txt] if outline_txt else []) + [base_prompt] if x])
-            prompt = revise(body, task, fb, sc, text, adhere=adhere if (adhere or {}).get("score") else None)
+            prompt = revise(body, task, fb, sc, text,
+                            adhere=adhere if (adhere or {}).get("score") else None,
+                            edge=edge_j if (edge_j or {}).get("score") else None)
             open(os.path.join(a.out_dir, f"round_{k + 1}_prompt.txt"), "w", encoding="utf-8").write(prompt)
 
     if not hist:
         sys.exit("错误：没有任何一轮生成成功")
-    # 选最佳：主尺 SPI/AoT 依从（高更好）；次尺 WFP 综合分（低更好）
+    # 选最佳：主尺 = 依从 + 棱角 + 结构（高更好）；次尺 WFP（低更好）；WFP 不得主导
     def _rank(h):
         ad = (h.get("adherence") or {}).get("score")
+        eg = (h.get("edge") or {}).get("score")
+        st = (h.get("adherence") or {}).get("structure_score")
+        primary = 0.0
+        n = 0
+        for v in (ad, eg, st):
+            if v is not None:
+                primary += float(v)
+                n += 1
+        primary = primary / n if n else -1
         wfp = h["composite"] if h["composite"] is not None else 99.0
-        return (-(ad if ad is not None else -1), wfp)
+        return (-primary, -(ad if ad is not None else -1), -(eg if eg is not None else -1), wfp)
     best = min(hist, key=_rank)
     best_text = Path(best["file"]).read_text(encoding="utf-8")
     open(os.path.join(a.out_dir, "best.txt"), "w", encoding="utf-8").write(best_text)
     report = {"baseline": baseline_path, "weights": a.weights or "prior", "temperature": temp,
-              "selection": "primary=SPI+AoT adherence (higher better); secondary=WFP composite (lower better)",
+              "edge_preserve": bool(edge_cfg.get("enabled", True)),
+              "selection": "primary=mean(adherence, edge, structure) higher better; "
+                           "secondary=WFP composite lower better (must not pull to mean)",
               "outline": outline, "persona_json": str(pj) if pj else None,
               "spec": {k: v for k, v in spec.items() if k != "corpus_dir"}, "fewshot": [s_["doc_id"] for s_ in shots],
               "notes": notes, "relaxed_features": relax,
               "rounds": hist, "best_round": best["round"], "best_composite": best["composite"],
-              "best_adherence": (best.get("adherence") or {}).get("score")}
+              "best_adherence": (best.get("adherence") or {}).get("score"),
+              "best_edge": (best.get("edge") or {}).get("score"),
+              "best_structure": (best.get("adherence") or {}).get("structure_score")}
 
     if a.blind_reference:
         import blind_test
@@ -359,18 +412,21 @@ def main():
                                 "note": "P(识破)：LLM 选中真文的概率；越接近 0.5 越以假乱真（独立信号，不并入综合分）"}
 
     json.dump(report, open(os.path.join(a.out_dir, "loop_report.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-    L = ["# 生成闭环报告（SPI+AoT 先导，WFP 表层）", "",
+    L = ["# 生成闭环报告（SPI+AoT 先导 · 棱角保留，WFP 次尺）", "",
          f"- 用途/平台：{spec.get('name') or spec.get('purpose') or '未指定'}｜题目：{spec.get('topic') or '—'}｜字数：{spec.get('length') or '—'}",
-         "- 选最佳：主尺=思维依从（高更好），次尺=WFP 综合分（低更好）",
-         f"- 大纲立场：{(outline or {}).get('stance') or '（无）'}",
+         "- 选最佳：主尺=依从+棱角+结构（高更好），次尺=WFP（低更好；不得拉回均值）",
+         f"- 棱角保留：{'开' if edge_cfg.get('enabled') else '关'}｜温度：{temp}",
+         f"- 框架立场：{(outline or {}).get('stance') or '（无）'}",
          f"- few-shot 来源：{'、'.join(report['fewshot']) or '无'}",
          f"- 基线：{baseline_path}", f"- 权重：{a.weights or '先验（field_map）'}",
-         f"- 最佳轮：第 {best['round']} 轮｜依从 {(best.get('adherence') or {}).get('score')} / WFP {best['composite']}", "",
-         "| 轮 | 思维依从 | WFP 综合 | " + " | ".join(v["label"] for v in hist[0]["layers"].values()) + " |",
-         "|---|---|---|" + "---|" * len(hist[0]["layers"])]
+         f"- 最佳轮：第 {best['round']} 轮｜依从 {(best.get('adherence') or {}).get('score')}｜棱角 {(best.get('edge') or {}).get('score')}｜结构 {(best.get('adherence') or {}).get('structure_score')}｜WFP {best['composite']}", "",
+         "| 轮 | 依从 | 棱角 | 结构 | WFP | " + " | ".join(v["label"] for v in hist[0]["layers"].values()) + " |",
+         "|---|---|---|---|---|" + "---|" * len(hist[0]["layers"])]
     for h in hist:
         ad = (h.get("adherence") or {}).get("score")
-        L.append(f"| {h['round']} | {ad} | {h['composite']} | " + " | ".join(str(h['layers'].get(n, {}).get('score', '')) for n in hist[0]["layers"]) + " |")
+        eg = (h.get("edge") or {}).get("score")
+        st = (h.get("adherence") or {}).get("structure_score")
+        L.append(f"| {h['round']} | {ad} | {eg} | {st} | {h['composite']} | " + " | ".join(str(h['layers'].get(n, {}).get('score', '')) for n in hist[0]["layers"]) + " |")
     L += [f"- {n_}" for n_ in notes]
     rel = [t for h in hist for t in h["relaxed_deviations"]]
     if rel:
@@ -379,7 +435,7 @@ def main():
     if report.get("blind_test"):
         L += ["", f"- LLM 盲测 P(识破)：{report['blind_test']['mean_p_detect']}（越接近 0.5 越以假乱真）"]
     open(os.path.join(a.out_dir, "loop_report.md"), "w", encoding="utf-8").write("\n".join(L) + "\n")
-    print(f"[ok] 最佳：第 {best['round']} 轮｜思维依从 {(best.get('adherence') or {}).get('score')}/7（主）"
+    print(f"[ok] 最佳：第 {best['round']} 轮｜依从 {(best.get('adherence') or {}).get('score')}/7｜棱角 {(best.get('edge') or {}).get('score')}/7｜结构 {(best.get('adherence') or {}).get('structure_score')}/7（主）"
           f"｜WFP {best['composite']}（次）→ {a.out_dir}/best.txt；报告 loop_report.md")
 
 

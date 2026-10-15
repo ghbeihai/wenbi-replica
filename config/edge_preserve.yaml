@@ -1,0 +1,14 @@
+# 棱角保留（anti-averaging）——默认开启
+# SPI+AoT 先导必须产出「解题思路 + 篇章结构」全框架，再套 WFP 表层；禁止平滑成中庸流水账。
+enabled: true
+generation_temperature: 1.05   # 高于普通生成，扩大棱角样本空间；选最佳时再按依从/棱角筛
+candidates_per_round: 1          # 每轮候选数（>1 时按棱角/依从选优再进入回灌；成本×N）
+aot_high: 5.0                    # AoT ≥ 此分视为高偏置维（棱角来源）
+aot_low: 3.5                     # AoT ≤ 此分视为低维 → 硬禁区
+spi_top_n: 4                     # 取相关度最高的 N 个人格簇作为棱角来源
+fewshot_prefer_edge: true        # few-shot 优先挑带判断句/反问/强硬收束的原文段
+no_smoothing_rules:
+  - 禁止把立场改写成「也许/可能/仁者见仁」式中庸总结
+  - 禁止把必含判断稀释成两边都对的平衡句
+  - 禁止为了文风数值好看而删掉棱角句
+  - 禁止流水账：每段必须推进解题或结构节点，不能只堆信息

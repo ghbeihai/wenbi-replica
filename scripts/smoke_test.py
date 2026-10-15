@@ -583,15 +583,26 @@ def _gen_config(tmp: Path, a_dir: Path, bl_path: Path, persona_md: Path):
          "--corpus-dir", a_dir, "--out-dir", lo2, "--rounds", "2"], env=MOCK)
     r2 = json.loads((lo2 / "loop_report.json").read_text(encoding="utf-8"))
     p1 = (lo2 / "round_1_prompt.txt").read_text(encoding="utf-8")
-    check((lo2 / "outline.json").exists() and "思维大纲" in p1 and p1.find("思维大纲") < p1.find("【写作要求】"),
-          "SPI+AoT 先导：先产出 outline，且大纲块在写作要求之前")
+    ol = json.loads((lo2 / "outline.json").read_text(encoding="utf-8"))
+    check((lo2 / "outline.json").exists() and ("篇章框架" in p1 or "思维大纲" in p1)
+          and (p1.find("篇章框架") if "篇章框架" in p1 else p1.find("思维大纲")) < p1.find("【写作要求】"),
+          "SPI+AoT 先导：先产出篇章框架，且框架块在写作要求之前")
+    check(ol.get("stance") and (ol.get("sections") or ol.get("thesis_arc") or ol.get("outline_text")),
+          "框架含立场 + 结构/弧线（非空条目堆）")
+    check((lo2 / "edge_profile.json").exists() or ol.get("edge"),
+          "棱角画像写入 edge_profile.json 或 outline.edge")
+    check("棱角" in p1, "生成 prompt 含棱角画像硬约束")
     check(r2.get("best_adherence") is not None and "adherence" in r2["rounds"][0]
-          and "SPI+AoT" in (lo2 / "loop_report.md").read_text(encoding="utf-8"),
-          f"闭环主尺=思维依从（最佳依从 {r2.get('best_adherence')}），报告标明 SPI+AoT 先导")
+          and r2.get("best_edge") is not None
+          and ("棱角" in (lo2 / "loop_report.md").read_text(encoding="utf-8")
+               or "SPI+AoT" in (lo2 / "loop_report.md").read_text(encoding="utf-8")),
+          f"闭环主尺=依从+棱角+结构（依从 {r2.get('best_adherence')}｜棱角 {r2.get('best_edge')}）")
+    check(float(r2.get("temperature") or 0) >= 1.0, f"棱角模式默认抬高温度（实际 {r2.get('temperature')}）")
     if (lo2 / "round_2_prompt.txt").exists():
         p2 = (lo2 / "round_2_prompt.txt").read_text(encoding="utf-8")
-        check("思维依从" in p2 and p2.find("思维依从") < p2.find("表层文风"),
-              "回灌：思维依从块在表层文风之前")
+        check(("思维依从" in p2 or "棱角" in p2) and p2.find("表层文风") > 0
+              and min(i for i in (p2.find("思维依从"), p2.find("棱角")) if i >= 0) < p2.find("表层文风"),
+              "回灌：依从/棱角块在表层文风之前")
     # 人设卡第四节顺序：SPI/AoT 在 WFP 数值前
     md_full = (tmp / "out_full" / "三件套人设卡_full.md")
     if md_full.exists():
@@ -600,6 +611,38 @@ def _gen_config(tmp: Path, a_dir: Path, bl_path: Path, persona_md: Path):
         check(sec.find("人格底色") < sec.find("表层说法") or sec.find("SPI") < sec.find("WFP")
               or "生成顺序" in sec,
               "人设卡第四节：SPI/AoT 先导说明在 WFP 表层之前")
+
+
+    # —— 棱角保留单元检查（通用，不绑定具体作者）——
+    sys.path.insert(0, str(SCRIPT_DIR))
+    import edge_profile, gen_spec, topic_outline, llm_common
+    ep = edge_profile.build({
+        "name": "t",
+        "spi_personality": [{"label": "A", "avg_relevance": 0.9, "n_first": 10},
+                            {"label": "B", "avg_relevance": 0.1, "n_first": 1}],
+        "aot_thinking": [{"dim_name": "高维", "mean": 6.0, "evidence": ["这个东西一定有问题。"]},
+                         {"dim_name": "低维", "mean": 2.0, "evidence": ["也许"]}],
+    })
+    check(ep["enabled"] and ep["high_spi"][0]["label"] == "A" and any("低维" in b for b in ep["hard_bans"])
+          and ep["sharp_evidence"] and "棱角画像" in edge_profile.block(ep),
+          "edge_profile：高偏置 SPI/AoT + 尖锐证据 + 低维硬禁")
+    check(edge_profile.load_cfg().get("enabled") is True
+          and float(edge_profile.load_cfg().get("generation_temperature", 0)) >= 1.0,
+          "edge_preserve.yaml 默认开启且温度≥1.0")
+    efs = tmp / "edge_fs"; efs.mkdir(exist_ok=True)
+    (efs / "a.txt").write_text(("今天天气不错我们来聊聊日常饮食习惯和一些可能的建议也许对你有帮助。") * 3, encoding="utf-8")
+    (efs / "b.txt").write_text(("没那回事！你说对不对？这个东西一定有问题，别指望神药，必须先讲清楚。") * 3, encoding="utf-8")
+    shots = gen_spec.pick_fewshot(str(efs), {"topic": "营养", "genre_pref": ""}, n=1, prefer_edge=True)
+    check(shots and shots[0]["doc_id"] == "b", "few-shot 优先棱角段")
+    hist = [
+        {"adherence": {"score": 4, "structure_score": 4}, "edge": {"score": 4}, "composite": 1.0},
+        {"adherence": {"score": 7, "structure_score": 7}, "edge": {"score": 7}, "composite": 3.0},
+    ]
+    def _rank(h):
+        ad, eg, st = (h.get("adherence") or {}).get("score"), (h.get("edge") or {}).get("score"), (h.get("adherence") or {}).get("structure_score")
+        primary = sum(v for v in (ad, eg, st) if v is not None) / 3
+        return (-primary, h["composite"])
+    check(min(hist, key=_rank)["composite"] == 3.0, "选最佳：主尺棱角/依从优先于更低 WFP")
 
     r = run([sys.executable, SCRIPT_DIR / "replicate.py", "--name", "nx", "--corpus-dir", a_dir, "--out-dir", tmp / "out_nx",
              "--genre", "off"])
