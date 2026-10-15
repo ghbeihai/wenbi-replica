@@ -182,9 +182,9 @@ def build_prompt(persona, hard, l3, aot, spi, label_map=None):
                      "正情/千字", "负情/千字", "四字格/千字"]:
             if hard.get(feat) is not None:
                 if feat == "我:你":
-                segs.append(f"我:你比例{max(0.5, hard[feat]-1):.1f}-{hard[feat]+1:.1f}（目标 {hard[feat]}）")
-            else:
-                segs.append(f"{feat}≈{hard[feat]}")
+                    segs.append(f"我:你比例{max(0.5, hard[feat]-1):.1f}-{hard[feat]+1:.1f}（目标 {hard[feat]}）")
+                else:
+                    segs.append(f"{feat}≈{hard[feat]}")
         parts.append("【数值约束】" + "；".join(segs) + "。")
 
     if l3:
@@ -208,7 +208,8 @@ def build_prompt(persona, hard, l3, aot, spi, label_map=None):
         if labels:
             parts.append("【人格底色】" + "（" + "、".join(labels[:6]) + "）。")
 
-    parts.append("【few-shot 示例】（请从原作者语料里挑 2-3 段最有代表性的原文贴在这里，比纯数值约束更有效）：")
+    parts.append("【人称提示】多用'我'讲自己的经历和感受，少用'你'直接喊话或说教。目标我:你比例见上方数值约束。")
+    parts.append("【few-shot 示例】（请从原作者语料里挑 2-3 段最有代表性的原文贴在这里，优先选第一人称叙述多的段落，比纯数值约束更有效）：")
     parts.append("【禁止】不书面化（不用'综上所述'等）；不堆隐喻；不顶格宣泄；不列一二三。")
     return "\n".join(parts)
 
