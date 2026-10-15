@@ -175,12 +175,13 @@ def build_prompt(persona, hard, l3, aot, spi, label_map=None):
         parts.append("【数值约束】" + "；".join(segs) + "。")
 
     if l3:
-        sorted_l3 = sorted(l3.items(), key=lambda x: -x[1])
-        top6 = sorted_l3[:6]
-        low_dims = [(k, v) for k, v in sorted_l3 if v < 4.0][:5]
+        sorted_l3_desc = sorted(l3.items(), key=lambda x: -x[1])
+        sorted_l3_asc = sorted(l3.items(), key=lambda x: x[1])
+        top6 = sorted_l3_desc[:6]
+        low_dims = [(k, v) for k, v in sorted_l3_asc if v < 4.0][:5]
         segs = [f"{k} {v}" for k, v in top6]
         if low_dims:
-            low_segs = [f"{k} 控制在{max(1, v-0.5):.1f}–{v+0.5:.1f}分（少用）" for k, v in low_dims]
+            low_segs = [f"{k} ≤{v+0.5:.1f}分（少用，不超过上限）" for k, v in low_dims]
             parts.append("【软画像】高分：" + "、".join(segs) + "；低分：" + "、".join(low_segs) + "（1–7 分）。")
         else:
             parts.append("【软画像】" + "（" + "、".join(segs) + "，1–7 分，按目标值对齐，避免顶格）。")

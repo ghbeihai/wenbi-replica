@@ -71,7 +71,7 @@ python3 scripts/replicate.py --name <对象key> --corpus-dir <原文目录> \
 - **SPI 人格**（需 DeepSeek key，`spi-quant` 已安装）：
   ```bash
   spi-quant profile --file <文章.txt> --out <profile.json>     # 逐篇打分
-  python3 $SPI_ROOT/scripts/reproduce_spi_clusters.py          # 聚类汇总 → $SPI_ROOT/assets/spi_cluster_all.json
+  python3 $SPI_ROOT/scripts/aggregate_spi_profiles.py <profiles_dir> --out spi_cluster_all.json  # 汇总被测人画像
   ```
 - **AoT 思维**（需 key）：
   ```bash
