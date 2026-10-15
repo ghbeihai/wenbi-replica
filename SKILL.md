@@ -107,6 +107,11 @@ python3 scripts/build_persona_generic.py --name <key> --display-name "人读名"
 - 硬指标数值约束直接写进 prompt（句长/问句/语气词/隐喻/我:你 命中后 Delta 显著下降）；
 - 低分维度要写"少用"设锚；软特征用负向锚 + 中低位目标值，避免顶格过冲（`references/limits.md` 第五节）。
 
+**生成 prompt 的 3 条经验（跨平台通用）**：
+1. **低数值特征必须显式写"少用"**：反问 0.2/篇、四字格 3.95/千字这类低值，不写"少用" LLM 默认往中间靠，会过量。写法：`修辞反问 ≤0.3 个/篇（少用）；四字格 ≤5 个/千字（不堆砌）`。
+2. **数值密度加 few-shot 体感**："正情 26/千字"这种数字 LLM 没概念，prompt 里抄 1-2 句原文当例子，让它对密度有体感。
+3. **短块语料回测跳过整体 Delta**：原文每篇 <500 字时，直接逐项对比关键指标（句长/正情密度/隐喻密度），报告里注明"语料偏短，Delta 参考意义有限"。
+
 ### ⑤ 指纹回测
 ```bash
 <WFP_ROOT>/scripts/extract_hard_metrics.py <生成文.txt> --json > gen_fp.json
