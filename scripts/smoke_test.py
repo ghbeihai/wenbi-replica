@@ -643,6 +643,9 @@ def _gen_config(tmp: Path, a_dir: Path, bl_path: Path, persona_md: Path):
         primary = sum(v for v in (ad, eg, st) if v is not None) / 3
         return (-primary, h["composite"])
     check(min(hist, key=_rank)["composite"] == 3.0, "选最佳：主尺棱角/依从优先于更低 WFP")
+    role_txt = gen_spec.task_text({"role": "某领域专业营养师", "topic": "测", "purpose": "口播稿", "name": "口播"})
+    check("作者身份/职业" in role_txt and "专业营养师" in role_txt, "生成配置 --role 进写作要求")
+
 
     r = run([sys.executable, SCRIPT_DIR / "replicate.py", "--name", "nx", "--corpus-dir", a_dir, "--out-dir", tmp / "out_nx",
              "--genre", "off"])

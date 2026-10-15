@@ -21,7 +21,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 PRESETS = REPO / "config" / "purpose_presets.yaml"
 FIELDS = ("purpose", "topic", "length", "audience", "tone", "format_notes", "extra", "relax",
-          "with_optional_format", "fewshot", "corpus_dir")
+          "with_optional_format", "fewshot", "corpus_dir", "role")
 FEWSHOT_RE = re.compile(r"【few-shot 示例】.*?(?=\n【|\Z)", re.S)
 
 
@@ -47,6 +47,7 @@ def add_args(ap):
     g.add_argument("--purpose", help="用途/平台预设：口播稿 / 公众号文章 / 朋友圈 / 小红书图文 / 知乎回答 / 演讲稿 / custom（见 config/purpose_presets.yaml）")
     g.add_argument("--topic", help="题目/主题")
     g.add_argument("--length", type=int, help="目标字数")
+    g.add_argument("--role", help="作者职业/身份（用户自填；进篇章框架与生成，覆盖笼统自称）")
     g.add_argument("--audience", help="目标读者")
     g.add_argument("--tone", help="语气/额外风格要求（用户自填，覆盖预设）")
     g.add_argument("--format-notes", help="格式说明（覆盖预设）")
@@ -84,6 +85,10 @@ def resolve(a, task=None) -> dict:
 
 def task_text(spec: dict) -> str:
     L = ["【写作要求】（本次由用户指定，优先于人设卡里的数值约束；冲突时以此为准，但保持作者本人的用词、语气与思维习惯）"]
+    if spec.get("role"):
+        L.append(f"- 作者身份/职业（硬约束）：{spec['role']}")
+        L.append("  （以此身份说话：专业服务者/照护者权威；可有棱角与主见，但不是局外喷子；"
+                 "戳瞎补/噱头时，站在「我给你管营养方案」一侧）")
     if spec.get("purpose"):
         L.append(f"- 用途/平台：{spec.get('name') or spec['purpose']}")
     if spec.get("topic"):

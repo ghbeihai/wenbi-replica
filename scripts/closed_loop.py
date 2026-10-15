@@ -264,6 +264,8 @@ def main():
     elif a.outline:
         outline = json.loads(Path(a.outline).read_text(encoding="utf-8"))
         notes.append(f"复用框架 {a.outline}")
+        if spec.get("role"):
+            outline["role"] = spec["role"]
         if pj:
             persona_obj = topic_outline.load_persona(pj)
             if edge_cfg.get("enabled") and not outline.get("edge"):
@@ -283,8 +285,11 @@ def main():
                   file=sys.stderr)
             outline = topic_outline.analyze(client, cfg, persona_obj, spec.get("topic") or "",
                                            spec.get("name") or spec.get("purpose") or "",
-                                           spec.get("extra") or "", edge=edge)
+                                           spec.get("extra") or "", edge=edge,
+                                           role=spec.get("role") or "")
             outline["topic"] = spec.get("topic")
+            if not outline.get("role"):
+                outline["role"] = spec.get("role") or persona_obj.get("role") or persona_obj.get("profession") or ""
             Path(a.out_dir, "outline.json").write_text(json.dumps(outline, ensure_ascii=False, indent=2), encoding="utf-8")
             print(f"[ok] 框架 → {a.out_dir}/outline.json｜立场：{outline.get('stance', '')[:60]}", file=sys.stderr)
     else:
@@ -413,7 +418,7 @@ def main():
 
     json.dump(report, open(os.path.join(a.out_dir, "loop_report.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=2)
     L = ["# 生成闭环报告（SPI+AoT 先导 · 棱角保留，WFP 次尺）", "",
-         f"- 用途/平台：{spec.get('name') or spec.get('purpose') or '未指定'}｜题目：{spec.get('topic') or '—'}｜字数：{spec.get('length') or '—'}",
+         f"- 用途/平台：{spec.get('name') or spec.get('purpose') or '未指定'}｜题目：{spec.get('topic') or '—'}｜字数：{spec.get('length') or '—'}" + (f"｜身份：{spec['role']}" if spec.get('role') else ""),
          "- 选最佳：主尺=依从+棱角+结构（高更好），次尺=WFP（低更好；不得拉回均值）",
          f"- 棱角保留：{'开' if edge_cfg.get('enabled') else '关'}｜温度：{temp}",
          f"- 框架立场：{(outline or {}).get('stance') or '（无）'}",

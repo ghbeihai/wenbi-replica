@@ -31,6 +31,7 @@ SYS = ("你是文笔复刻的「篇章框架」分析器（SPI+AoT 先导 · 棱
        "根据人格簇与思维维度，为这位有主见的作者设计本题的完整文章框架："
        "解题思路 + 篇章结构，防止写成流水账或中庸平均稿。"
        "必须保留棱角与鲜明主张；禁止把立场磨平。"
+       "若提供了作者身份/职业，立场与尖锐主张必须从该身份发出（专业服务/照护权威可硬、可戳瞎补，但不是局外喷子骂患者）。"
        "不要写文风数值，不要写句长/标点/语气词，不要写成品正文。输出严格 JSON。")
 
 
@@ -41,8 +42,13 @@ def load_persona(path) -> dict:
     return d
 
 
-def pack_persona(p: dict, edge: dict | None = None) -> str:
+def pack_persona(p: dict, edge: dict | None = None, role: str = "") -> str:
     lines = [f"作者：{p.get('display_name') or p.get('name')}"]
+    role = (role or p.get("role") or p.get("profession") or "").strip()
+    if role:
+        lines.append(f"【作者身份/职业 · 硬约束】{role}")
+        lines.append("（棱角与主见保留，但说话位置是专业照护者/服务者，不是局外喷子；"
+                     "戳瞎补与噱头时，站在「我负责给你管方案」一侧，对象是患者不是「你们这帮白痴」。）")
     if edge and edge.get("enabled"):
         lines.append(edge_profile.block(edge))
     spi = p.get("spi_personality") or []
@@ -60,15 +66,17 @@ def pack_persona(p: dict, edge: dict | None = None) -> str:
 
 
 def analyze(client, cfg, persona: dict, topic: str, purpose: str = "", extra: str = "",
-            edge: dict | None = None) -> dict:
+            edge: dict | None = None, role: str = "") -> dict:
     edge = edge if edge is not None else edge_profile.build(persona)
-    user = (f"{pack_persona(persona, edge)}\n\n"
+    role = (role or persona.get("role") or persona.get("profession") or "").strip()
+    user = (f"{pack_persona(persona, edge, role=role)}\n\n"
             f"【本题】{topic}\n"
+            + (f"【作者身份/职业】{role}\n" if role else "")
             + (f"【用途/平台】{purpose}\n" if purpose else "")
             + (f"【其他要求】{extra}\n" if extra else "")
             + "\n请输出完整篇章框架 JSON（不是条目清单）：\n"
             "{\n"
-            '  "stance": "一句话鲜明立场（有棱角，不要中庸）",\n'
+            '  "stance": "一句话鲜明立场（有棱角；若给了职业身份，必须从该身份说话，专业照护权威，不是局外骂街）",\n'
             '  "thesis_arc": "全文解题弧线：开题如何破、中段如何推进、收束如何钉死（一段话）",\n'
             '  "sections": [\n'
             '    {"role": "开题/破题/展开/纠偏/收束等", "purpose": "本节在解题中的作用",\n'
@@ -96,13 +104,16 @@ def analyze(client, cfg, persona: dict, topic: str, purpose: str = "", extra: st
         d["sections"] = [{"role": "展开", "purpose": "推进", "point": x, "move": ""} for x in d["decompose"]]
     d["edge"] = edge
     d["frame"] = d.get("frame") or d.get("thesis_arc") or ""
+    d["role"] = role
     return d
 
 
 def outline_block(d: dict) -> str:
     """写入生成 prompt 的硬约束块（先于 WFP）。"""
-    L = ["【篇章框架 · 硬约束｜SPI+AoT 先导 · 解题思路+结构｜禁止流水账与平滑平均】",
-         f"- 鲜明立场：{d.get('stance', '')}"]
+    L = ["【篇章框架 · 硬约束｜SPI+AoT 先导 · 解题思路+结构｜禁止流水账与平滑平均】"]
+    if d.get("role"):
+        L.append(f"- 作者身份：{d['role']}（专业照护权威；可硬可戳，勿变局外喷子）")
+    L.append(f"- 鲜明立场：{d.get('stance', '')}")
     if d.get("thesis_arc"):
         L.append(f"- 解题弧线：{d['thesis_arc']}")
     elif d.get("frame"):
@@ -144,7 +155,7 @@ def judge_adherence(client, cfg, persona: dict, outline: dict, text: str) -> dic
     sys_p = ("你是文笔复刻的「思维依从」评审（SPI+AoT 依从任务）。"
              "评生成文是否按篇章框架的立场/弧线/分节主见来想问题，是否避免流水账。"
              "不要评句长、标点、语气词。输出严格 JSON。")
-    user = (f"{pack_persona(persona, outline.get('edge'))}\n\n【本题篇章框架】\n{outline_block(outline)}\n\n"
+    user = (f"{pack_persona(persona, outline.get('edge'), role=outline.get('role') or '')}\n\n【本题篇章框架】\n{outline_block(outline)}\n\n"
             f"【生成文】\n{text[:3500]}\n\n"
             "输出 JSON：{\"score\":1到7,\"structure_score\":1到7,\"confidence\":0到1,"
             "\"hits\":[\"写对了的思维/结构点\"],\"misses\":[\"偏离或流水账处\"],"
@@ -174,7 +185,7 @@ def judge_edge(client, cfg, persona: dict, outline: dict, text: str) -> dict:
              "评生成文是否保留此人的鲜明主张与硬判断，有没有被磨成中庸平均稿或流水账。"
              "不要评句长标点。输出严格 JSON。")
     claims = "；".join(str(x) for x in (outline.get("sharp_claims") or outline.get("must_include") or [])[:5])
-    user = (f"{pack_persona(persona, outline.get('edge'))}\n\n"
+    user = (f"{pack_persona(persona, outline.get('edge'), role=outline.get('role') or '')}\n\n"
             f"【应有立场】{outline.get('stance')}\n【应有尖锐主张】{claims}\n\n"
             f"【生成文】\n{text[:3500]}\n\n"
             "输出 JSON：{\"score\":1到7,\"confidence\":0到1,"
@@ -213,6 +224,7 @@ def main():
     ap.add_argument("--persona-json", required=True)
     ap.add_argument("--topic", required=True)
     ap.add_argument("--purpose", default="")
+    ap.add_argument("--role", default="", help="作者职业/身份")
     ap.add_argument("--extra", default="")
     ap.add_argument("--edge-config", help="edge_preserve.yaml")
     ap.add_argument("--out")
@@ -222,7 +234,7 @@ def main():
     edge = edge_profile.build(persona, edge_profile.load_cfg(a.edge_config))
     cfg = llm_common.load_llm_cfg(Path(WFP) / "config" / "llm.yaml")
     client = llm_common.make_client(llm_common.require_key(Path(WFP)), cfg)
-    d = analyze(client, cfg, persona, a.topic, a.purpose, a.extra, edge=edge)
+    d = analyze(client, cfg, persona, a.topic, a.purpose, a.extra, edge=edge, role=a.role)
     d["topic"] = a.topic
     d["purpose"] = a.purpose
     if a.out:
