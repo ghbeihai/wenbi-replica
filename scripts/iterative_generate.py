@@ -25,6 +25,13 @@ try:
     from field_map import flatten as _flatten, baseline_stat as _bstat
 except ImportError:  # 没有 WFP_ROOT / 旧版 wfp：退回原始字段逐项对比
     _flatten = _bstat = None
+    print("[警告] 未找到 $WFP_ROOT/scripts/field_map.py（WFP_ROOT 未设置或 wfp-toolkit 过旧）："
+          "退回原始字段逐项对比，与回测 Delta 口径不一致。请 export WFP_ROOT=<wfp-toolkit 路径>。", file=sys.stderr)
+try:
+    from field_map import label as _label
+except ImportError:
+    def _label(k):
+        return k
 
 
 def find_top_deviations(gen_fp: dict, baseline: dict, top_n: int = 5) -> list:
@@ -50,6 +57,7 @@ def find_top_deviations(gen_fp: dict, baseline: dict, top_n: int = 5) -> list:
             z = abs(v - mean) / sd
             deviations.append({
                 "feature": k,
+                "label": _label(k),
                 "gen_value": round(v, 2),
                 "target_mean": round(mean, 2),
                 "z_score": round(z, 2),
@@ -65,7 +73,8 @@ def build_correction_prompt(original_prompt: str, deviations: list) -> str:
     corrections = []
     for d in deviations:
         corrections.append(
-            f"- {d['feature']}：{d['direction']}（当前 {d['gen_value']}，目标 {d['target_mean']}），请调整"
+            f"- {d.get('label') or d['feature']}：{d['direction']}（当前 {d['gen_value']}，目标约 {d['target_mean']}），"
+            f"请{'减少' if d['direction'] == '偏高' else '增加'}"
         )
 
     correction_block = "\n".join(corrections)
@@ -97,7 +106,12 @@ def main():
     gen_fp = json.loads(Path(args.gen_fp).read_text(encoding="utf-8"))
     original_prompt = Path(args.original_prompt).read_text(encoding="utf-8")
 
+    if args.round < 1:
+        print("--round 必须 ≥1", file=sys.stderr)
+        sys.exit(1)
     deviations = find_top_deviations(gen_fp, baseline, args.top)
+    if not deviations:
+        print("[警告] 没有可对比的特征（基线与指纹口径不匹配？），修正 prompt 与原 prompt 相同", file=sys.stderr)
     corrected_prompt = build_correction_prompt(original_prompt, deviations)
 
     result = {
@@ -113,7 +127,7 @@ def main():
     print(f"=== 第 {args.round} 轮迭代 ===")
     print(f"\n偏得最多的 {len(deviations)} 项：")
     for d in deviations:
-        print(f"  {d['feature']}: {d['direction']}（{d['gen_value']} vs 目标 {d['target_mean']}，z={d['z_score']}）")
+        print(f"  {d['label']}（{d['feature']}）: {d['direction']}（{d['gen_value']} vs 目标 {d['target_mean']}，z={d['z_score']}）")
 
     print("\n修正后的 prompt（喂给 LLM 生成下一版）：")
     print("-" * 50)
