@@ -464,6 +464,20 @@ def _v3opt(tmp: Path, a_dir: Path, b_dir: Path, bl_path: Path):
           "closed_loop：分层偏差以中文标签回灌 prompt")
     check(all(h["layers"] for h in lr["rounds"]) and lr.get("blind_test", {}).get("mean_p_detect") is not None
           and (lo / "loop_report.md").exists(), "closed_loop：逐轮分层分数报告 + 盲测独立信号")
+    # 体裁偏离：目标基线是讲稿，mock 生成的是随笔 → 仍按目标基线打分（各轮同一把尺子），并回灌"改回体裁"
+    lg = tmp / "loop_genre"
+    gbl = og / "wfp_baseline_g.json"
+    run([sys.executable, SCRIPT_DIR / "closed_loop.py", "--persona-md", persona_md, "--baseline", gbl,
+         "--task", "写一篇谈读书的短文", "--out-dir", lg, "--rounds", "3"], env=MOCK)
+    lgr = json.loads((lg / "loop_report.json").read_text(encoding="utf-8"))
+    sys.path.insert(0, str(WFP_SCRIPTS))
+    import ruler
+    gb = json.loads(gbl.read_text(encoding="utf-8"))
+    same_ruler = all(h["composite"] == ruler.score(ruler.vector(json.loads(
+        (lg / f"round_{h['round']}_fp.json").read_text(encoding="utf-8"))), gb)["composite"] for h in lgr["rounds"])
+    mm = [h["round"] for h in lgr["rounds"] if h["genre_mismatch"] and h["round"] < 3]
+    check(same_ruler and mm and "体裁偏离" in (lg / f"round_{mm[0] + 1}_prompt.txt").read_text(encoding="utf-8"),
+          "closed_loop：体裁偏离时仍用目标基线打分（逐轮可比）并回灌体裁修正")
 
 
 if __name__ == "__main__":

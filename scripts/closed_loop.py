@@ -13,7 +13,8 @@
 
 产物：loop_out/round_<k>.txt、round_<k>_fp.json、loop_report.json、loop_report.md、best.txt
 说明：
-  - 每轮分数为 ruler 综合分（越低越像；与 Delta 同量级）及分层分；生成文体裁与基线不符时自动切同体裁基线或告警。
+  - 每轮分数为 ruler 综合分（越低越像；与 Delta 同量级）及分层分，各轮始终对同一目标基线打分（保证可比）；
+    生成文体裁偏离目标体裁时告警、把"改回目标体裁"写进下一轮修正，同体裁基线分只作参考记录。
   - 不给 --weights 时用 field_map 默认先验权重。
   - --blind-reference：对最佳轮再跑 LLM 盲测尺（与原文成对判断，正反顺序），作为独立信号写入报告。
   - 需要 DeepSeek key（或 WENBI_MOCK_LLM=1 走离线 mock）。
@@ -138,23 +139,29 @@ def main():
         tp = os.path.join(a.out_dir, f"round_{k}.txt")
         fp = fingerprint(text, tp)
         json.dump(fp, open(os.path.join(a.out_dir, f"round_{k}_fp.json"), "w", encoding="utf-8"), ensure_ascii=False)
-        bl_k, bl_k_path = baseline, baseline_path
+        genre_note, alt_comp = None, None
         if a.genre != "off":
             g = genre_mod.classify(text)["genre"]
             bg = baseline.get("genre")
             if bg and g != bg:
+                # 选最佳轮必须用同一把尺子：打分/回灌始终对目标基线；同体裁基线分只作参考记录
                 stem = os.path.basename(baseline_path)[:-5].split("__")[0]
                 alt = os.path.join(os.path.dirname(baseline_path), f"{stem}__{g}.json")
-                print(f"[warn] 第 {k} 轮生成文体裁「{genre_mod.GENRE_ZH.get(g, g)}」≠ 基线体裁「{genre_mod.GENRE_ZH.get(bg, bg)}」"
-                      + ("；本轮按同体裁基线打分" if os.path.exists(alt) else "；无同体裁基线，分数跨体裁不可靠"),
+                gz, bz = genre_mod.GENRE_ZH.get(g, g), genre_mod.GENRE_ZH.get(bg, bg)
+                print(f"[warn] 第 {k} 轮生成文体裁「{gz}」≠ 目标体裁「{bz}」：仍按目标基线打分，并在下一轮要求改回「{bz}」",
                       file=sys.stderr)
+                genre_note = {"genre": g, "target": bg, "text": f"体裁偏离：上一稿写成了「{gz}」，请写成「{bz}」"}
                 if os.path.exists(alt):
-                    bl_k_path = alt
-                    bl_k = json.loads(Path(alt).read_text(encoding="utf-8"))
+                    alt_comp = ruler.score(ruler.vector(fp), json.loads(Path(alt).read_text(encoding="utf-8")),
+                                           weights)["composite"]
         vec = ruler.vector(fp)
-        sc = ruler.score(vec, bl_k, weights)
-        fb = feedback(vec, bl_k, sc, weights)
-        hist.append({"round": k, "file": tp, "baseline": bl_k_path, "composite": sc["composite"], "n_features": sc["n"],
+        sc = ruler.score(vec, baseline, weights)
+        fb = feedback(vec, baseline, sc, weights)
+        if genre_note:
+            fb.insert(0, {"feature": "genre", "label": "体裁", "layer": "", "value": genre_note["genre"],
+                          "target": genre_note["target"], "z": None, "text": genre_note["text"]})
+        hist.append({"round": k, "file": tp, "genre_mismatch": genre_note, "same_genre_baseline_composite": alt_comp,
+                     "composite": sc["composite"], "n_features": sc["n"],
                      "layers": {n: {"label": v["label"], "score": v["score"]} for n, v in sc["layers"].items()},
                      "feedback": fb, "prompt_chars": len(prompt)})
         print(f"[round {k}] 综合分 {sc['composite']}（{sc['n']} 特征）| "
