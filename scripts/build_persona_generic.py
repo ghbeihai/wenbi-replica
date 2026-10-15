@@ -103,23 +103,33 @@ def load_wfp(wfp_baseline, l3_baseline, people_baseline, people_key, l3_config):
     bl = (wfp_baseline or {}).get("baseline", {})
     avg_chars = (wfp_baseline or {}).get("avg_chars", 0) or 0
 
-    def pick(feat, fmt=None):
-        try:
-            v = bl[feat]["mean"]
-            if v is None:
-                return None
-            return v if fmt is None else fmt(v)
-        except (KeyError, TypeError):
-            return None
-
-    def pick_people(feat, fmt=None):
+    def pick_people(feat):
+        """块级七人基线兜底：{"people": {key: {"hard": {feat: 值 或 {"mean": 值}}}}}"""
         try:
             v = people_baseline["people"][people_key]["hard"][feat]
-            if v is None:
-                return None
-            return v if fmt is None else fmt(v)
         except (KeyError, TypeError):
             return None
+        return v.get("mean") if isinstance(v, dict) else v
+
+    def pick(feat, fmt=None):
+        """篇章级 WFP 基线优先；缺失时用 --people-baseline/--people-key 的块级值补齐。"""
+        v = None
+        try:
+            v = bl[feat]["mean"]
+        except (KeyError, TypeError):
+            pass
+        if v is None and people_baseline and people_key:
+            v = pick_people(feat)
+            if v is not None:
+                used_people.add(feat)
+        if v is None:
+            return None
+        return v if fmt is None else fmt(v)
+
+    used_people = set()
+    if people_baseline and not (people_key and (people_baseline.get("people") or {}).get(people_key)):
+        print(f"[警告] --people-baseline 中找不到 --people-key '{people_key}'，块级兜底不生效。"
+              f"可用 key：{list((people_baseline.get('people') or {}).keys())}", file=sys.stderr)
 
     v = pick("L1_SYN_001_avg_sl", round1)
     if v is not None:
@@ -184,15 +194,19 @@ def load_wfp(wfp_baseline, l3_baseline, people_baseline, people_key, l3_config):
     l3 = {}
     dims = (l3_baseline or {}).get("baseline", {})
     names = {}
-    try:
-        import yaml
-        names = {d["id"]: d.get("name", d["id"]) for d in yaml.safe_load(open(l3_config, encoding="utf-8"))["dimensions"]}
-    except Exception:
-        pass
+    if dims:
+        try:
+            import yaml
+            names = {d["id"]: d.get("name", d["id"])
+                     for d in yaml.safe_load(open(l3_config, encoding="utf-8"))["dimensions"]}
+        except Exception as e:  # noqa: BLE001
+            print(f"[警告] 读取 L3 维度名 {l3_config or '(未设 WFP_ROOT)'} 失败：{e}；"
+                  "将使用基线里的 dim_name 或维度 id", file=sys.stderr)
     for k, v in dims.items():
         mean = v.get("mean") if isinstance(v, dict) else v
+        label = (v.get("dim_name") if isinstance(v, dict) else None) or names.get(k, k)  # 基线自带名优先
         if mean is not None:
-            l3[names.get(k, k)] = round(float(mean), 2)
+            l3[label] = round(float(mean), 2)
 
     # 隐喻根域：从基线里读各根域密度，排名后输出
     meta_domains = {}
@@ -205,6 +219,8 @@ def load_wfp(wfp_baseline, l3_baseline, people_baseline, people_key, l3_config):
     if meta_domains:
         top_domains = sorted(meta_domains.items(), key=lambda x: -x[1])[:3]
         hard["隐喻根域top3"] = "、".join(f"{d}({round(v, 2)}/千字)" for d, v in top_domains)
+    if used_people:
+        print(f"[提示] {len(used_people)} 项硬指标来自块级基线（{people_key}）：{sorted(used_people)}", file=sys.stderr)
 
     return hard, l3
 
@@ -370,7 +386,9 @@ def main():
         "source": {
             "SPI": "32因子→15语义簇" if spi else None,
             "AoT": "270构念→25维" if aot else None,
-            "WFP": "硬指标+17软维度" if (hard or l3) else None,
+            "WFP": ("+".join(x for x in (f"硬指标{len(hard)}项" if hard else "",
+                                         f"L3软维度{len(l3)}维" if l3 else "") if x)
+                    or None),
         },
         "spi_personality": spi,
         "aot_thinking": aot,
