@@ -8,7 +8,7 @@
 wenbi-replica（本仓）= 编排层：语料归一 → 三件套画像 → 人设卡 → 模仿文 → 回测
 ├── spi-toolkit   人格底色（他是谁）
 ├── aot-toolkit   思维模式（他怎么想）
-└── wfp-toolkit   文风指纹（他怎么说）
+└──  v0.1.0  文风指纹（他怎么说）
 ```
 
 - SPI + AoT = **「里」**，解释作者内核
@@ -52,7 +52,7 @@ python3 scripts/replicate.py --name alice \
 
 | 变量 | 说明 |
 |---|---|
-| `WFP_ROOT` | wfp-toolkit 根目录 |
+| `WFP_ROOT` |  v0.1.0根目录 |
 | `SPI_ROOT` | spi-toolkit 根目录 |
 | `AoT_ROOT` | aot-toolkit 根目录 |
 | `DEEPSEEK_API_KEY` | LLM 打分 key（无 key 自动进入模拟模式） |
@@ -88,8 +88,8 @@ MIT
 
 | 仓库 | 版本 | 说明 |
 |---|---|---|
-| spi-toolkit | v0.1.0 | 人格量化（32 因子 × 15 聚类） |
-| aot-toolkit | v0.1.0 | 思维模式（25 维） |
-| wfp-toolkit | v0.1.0 | 文风指纹（硬指标 + L3 软评分 + L4 隐喻） |
+| spi-toolkit | v0.1.1 | 人格量化（32 因子 × 15 聚类） |
+| aot-toolkit | v0.1.1 | 思维模式（25 维） |
+|  v0.1.0| v0.1.0 | 文风指纹（硬指标 + L3 软评分 + L4 隐喻） |
 
 版本错位可能导致脚本调用失败，升级时请同步更新。
