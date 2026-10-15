@@ -64,15 +64,29 @@ python3 scripts/replicate.py --name <对象key> --corpus-dir <原文目录> \
 语料要求：对象本人真实文本，建议 ≥20 篇、单篇 ≥300 字（不足时参考 `references/limits.md` 第 11 条兜底）。
 
 ### ② 三件套画像（各模块独立跑，可并行）
+
+**所有脚本都在各自 toolkit 的 scripts/ 目录下，直接调用，不要自己拼格式。**
+
 - **WFP 硬指标基线**：`replicate.py` 自动完成（逐篇指纹 + 聚合）。
 - **SPI 人格**（需 DeepSeek key，`spi-quant` 已安装）：
-  `spi-quant profile --file <文本> --out <out>` 逐篇批处理，聚类画像产出 `spi_cluster_all.json`。
-- **AoT 思维**（需 key）：`<AoT_ROOT>/scripts/score_dimensions.py --full`
-  → `people_profiles.json`（25 维 × top5）。
-- **WFP L3 软评分**（需 key）：`<WFP_ROOT>/scripts/score_stylistics.py --source spi`
-  → `l3_baseline.json`（17 维）。
-- **WFP L4 隐喻识别**（需 key）：`<WFP_ROOT>/scripts/score_metaphor.py 文章.txt --json`
-  → `l3_baseline.json`（17 维）。断点续跑，重复执行只补未完成项。
+  ```bash
+  spi-quant profile --file <文章.txt> --out <profile.json>     # 逐篇打分
+  python3 $SPI_ROOT/scripts/reproduce_spi_clusters.py          # 聚类汇总 → spi_cluster_all.json
+  ```
+- **AoT 思维**（需 key）：
+  ```bash
+  python3 $AOT_ROOT/scripts/score_dimensions.py --full        # → people_profiles.json（25维 top5）
+  python3 $AOT_ROOT/scripts/score_criterion.py                 # → criterion_scores.json
+  python3 $AOT_ROOT/scripts/score_thinking.py                  # → thinking_scores.json
+  ```
+- **WFP L3 软评分**（需 key）：
+  ```bash
+  python3 $WFP_ROOT/scripts/score_stylistics.py --source spi  # → l3_baseline.json（17维）
+  ```
+- **WFP L4 隐喻识别**（需 key）：
+  ```bash
+  python3 $WFP_ROOT/scripts/score_metaphor.py <文章.txt> --json  # → 12根域隐喻密度 + 例句
+  ```
 
 无 key 时 SPI/AoT/L3/L4 这些 LLM 打分环节**直接报错退出**；只有 WFP L1/L2 纯规则硬指标可无 key 运行。
 
@@ -100,6 +114,8 @@ python3 scripts/build_persona_generic.py --name <key> --display-name "人读名"
 ```
 判断口径：**Delta 越低越像**（同质长文实测：真实文基线 ~1.5 / 模仿文收敛至 ~1.3 / 对照文 ~7+，判别比可达 4×）。
 异质语料时 Delta 会失效（判别比≈1×），改用分层基线（≥800 字）或非参数判据。
+
+**⚠️ 篇幅差异陷阱**：如果原文每篇平均 <500 字，而生成文 >1000 字，按"每篇"算的指标（问句/篇、修辞反问/篇）会被篇幅放大，导致 Delta 失真。这时**改用"每千字"归一化指标对比**（语气词/千字、衔接词/千字、隐喻/千字），不要看绝对 Delta 数值。
 
 `replicate.py --backtest <生成文.txt>` 可自动完成 ⑤。
 
