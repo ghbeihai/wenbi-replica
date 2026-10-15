@@ -69,3 +69,15 @@ python3 scripts/replicate.py --name alice \
 ## License
 
 MIT
+
+## 版本号规则
+
+每次 push 前更新 VERSION 文件：
+
+| 改动类型 | 版本号变化 | 示例 |
+|---|---|---|
+| 修 bug / 改文档 | PATCH +1 | 1.0.0 → 1.0.1 |
+| 新增功能 / 加脚本 | MINOR +1 | 1.0.0 → 1.1.0 |
+| 流水线大改 / 换框架 | MAJOR +1 | 1.0.0 → 2.0.0 |
+
+当前版本见根目录 `VERSION` 文件。
