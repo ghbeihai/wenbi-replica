@@ -32,9 +32,8 @@ SPI + AoT 是「里」，解释作者内核；WFP 是「表」，数值化表层
 ④ 生成模仿文（投喂给任意 LLM）
   ↓
 ⑤ 回测校验
-  ├── 每千字归一化 Delta（排除篇幅偏差）
-  ├── Burrows Delta（高频虚词词频分布，真正区分作者）
-  └── 判别力自检（验证尺子准不准）
+  ├── Delta：27 个每千字/比例特征的加权平均 |z|（field_map v3，排除篇幅量、原始 TTR，句长簇降权）
+  └── 判别力自检两关（留出 vs 对照 ≥1.5、留出 vs 异作者 ≥1.2）
   ↓
 迭代闭环：偏项自动写回 prompt → 再生成，最多 3 轮
 ```
@@ -53,20 +52,21 @@ git clone https://github.com/ghbeihai/spi-toolkit.git
 git clone https://github.com/ghbeihai/aot-toolkit.git
 git clone https://github.com/ghbeihai/wfp-toolkit.git
 
-export SPI_ROOT=./spi-toolkit
-export AOT_ROOT=./aot-toolkit
-export WFP_ROOT=./wfp-toolkit
-
-# 3. 一键安装（Python 依赖 + Personality Atlas 1.1G + 3072 维嵌入 879M）
-bash scripts/install.sh
+# 3. 一键安装：自动找同级目录的三个 toolkit、建/用 venv、装依赖 + Personality Atlas（1.1G），生成 wenbi.env
+#    （--with-local 额外装 SPI 离线映射的 3072 维嵌入 879M；--persist 写入 ~/.bashrc）
+cd wenbi-replica && bash scripts/install.sh
+source wenbi.env
+python3 scripts/smoke_test.py      # 离线冒烟测试（mock LLM，不需要 key）
 
 # 4. 最小闭环（仅 WFP 硬指标，不调 LLM）
 python3 scripts/replicate.py --name alice \
   --corpus-dir ./alice_原文 \
   --out-dir ./out
 
-# 5. 完整版（SPI + AoT + WFP 全跑）
-#    先跑各 toolkit 的打分脚本，再把结果传给 replicate.py
+# 5. 完整版（SPI + AoT + WFP 全跑）：先按 SKILL.md ② 跑各 toolkit 的打分脚本，再合成
+python3 scripts/replicate.py --name alice --wfp-baseline ./out/wfp_baseline_alice.json \
+  --spi-clusters spi_cluster_all.json --aot-profiles people_profiles.json --aot-person 爱丽丝 \
+  --l3-baseline l3_baseline.json --out-dir ./out --backtest 生成文.txt
 ```
 
 ---
@@ -77,8 +77,9 @@ python3 scripts/replicate.py --name alice \
 |---|---|
 | `persona_<name>.json` | 结构化人设卡（程序消费） |
 | `三件套人设卡_<name>.md` | 人读版 + 可直接投喂的生成指令模板 |
-| `wfp_baseline_<name>.json` | 文风指纹基线（含 avg_chars） |
-| `回测结果.json` | Delta、判别比、逐项偏离 |
+| `wfp_baseline_<name>.json` | 文风指纹基线（含 avg_chars、doc_ids、field_map_version） |
+| `fingerprints/` | 逐篇指纹 |
+| `_backtest_fp.json` | `--backtest` 时生成文指纹；Delta 打印在终端 |
 
 ---
 

@@ -72,7 +72,7 @@
 - **字段格式不对** → 报错退出，列出具体缺哪个字段
 - **单篇语料解析失败** → 警告并跳过该篇，但最后要统计成功/失败数量
 
-## field_map v2（wfp-toolkit field_map.py，FIELD_MAP_VERSION = 2）
+## field_map v3（wfp-toolkit field_map.py，FIELD_MAP_VERSION = 3）
 
 `validate_discrimination` / `normalize_backtest` / `merge_fingerprint` / `replicate`（基线）/
 `iterative_generate` 全部调用 `field_map.flatten()` + `field_map.delta()`，不再各自维护口径。
@@ -86,4 +86,13 @@
 | `L2_DIS_001_paras` | —（排除） | 篇幅量 |
 | `L4_SUR_001_meta_domains(_total)` | —（重复） | 与 `L4_SUR_001_meta_per_k` 相等 |
 
-旧基线（无 `field_map_version`）由 `baseline_stat()` 用 `avg_chars` 近似换算，建议重建基线。
+| `L1_LEX_002_ttr_word` | —（v3 排除） | 原始 TTR 随篇长单调下降；词汇多样性用 `L1_LEX_001_sttr100` |
+| `L1_LEX_006_wo_ni_ratio`、`L4_SUR_003_pos_neg_ratio` | 同名（v3 口径） | (a+1)/(b+1) 平滑，分母为 0 不再爆炸；v<3 旧基线自动跳过这两项 |
+| 句长簇 6 项（avg/sd/med/short/long/burstiness） | 同名 | 共享权重 3.0（每项 0.5），避免同一信号重复计票 |
+
+- 基线聚合唯一实现：`field_map.aggregate_baseline()`（`replicate.py` 与 `extract_hard_metrics.py --summary` 共用，逐项相同）；
+  sd 为样本标准差（n-1）；输出含 `doc_ids`（文件名 stem）、`missing_features`、`field_map_version`。
+- 退化检查 `check_baseline()`：篇数 <5 或 sd>0 的可用特征 <10 → `DegenerateBaseline`，所有 Delta 消费者报错退出；
+  空文本 → `EmptyText` 报错（不再 per_k=0）。
+- 迭代修正 prompt 用 `field_map.FEATURE_LABELS` 的中文标签。
+- 旧基线（无 `field_map_version`）由 `baseline_stat()` 用 `avg_chars` 近似换算，建议重建基线。

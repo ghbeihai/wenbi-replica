@@ -14,16 +14,15 @@ description: 文笔复刻（Writing Style Replication）通用流水线：给定
 2. **三个 toolkit 路径**：检查 `SPI_ROOT`、`AOT_ROOT`、`WFP_ROOT` 三个环境变量是否指向对应 toolkit 根目录。
    - 未设置 → 提醒用户："请设置三个 toolkit 的路径：`export SPI_ROOT=... AOT_ROOT=... WFP_ROOT=...`"
 
-3. **Python 依赖**：首次运行前确保已安装 `jieba pyyaml numpy openai`，且 SPI 已 `pip install -e` 安装。
+3. **Python 依赖**：推荐直接 `bash scripts/install.sh`（自动建/用 venv，装齐 `jieba pyyaml numpy pandas scikit-learn openai python-dotenv` + `pip install -e $SPI_ROOT`，检查三个兄弟仓库，生成 `wenbi.env`，装完自检）。装完 `source wenbi.env`；离线冒烟：`python3 scripts/smoke_test.py`（不需要 key、不花钱）。
 
 4. **SPI 的 Personality Atlas 数据仓库（必需，~1.1GB）**：检查 `$SPI_ROOT/assets/survey/results/spi_table.json` 是否存在。
    - 不存在 → **提醒用户**："SPI 人格打分依赖 Personality Atlas 数据（约 1.1GB），首次使用需执行：`cd $SPI_ROOT/assets && git clone https://github.com/Wildertrek/survey.git`"
    - 这是必需数据，不是可选对照；没有它 SPI 人格打分跑不了。
 
-5. **SPI 的 3072 维嵌入数据（必需，~879MB）**：检查 `$SPI_ROOT/assets/hf-3072/Embeddings_3072/` 是否存在。
-   - 不存在 → **提醒用户**："SPI 因子映射需要 3072 维嵌入数据（约 879MB），执行：`pip install huggingface_hub && huggingface-cli download Wildertrek/personality-atlas-3072 --repo-type dataset --local-dir $SPI_ROOT/assets/hf-3072`"
+5. **SPI 的 3072 维嵌入数据（可选，~879MB）**：只有 `--spi-mode local` / `spi-quant spi --mode local` 离线映射才需要；默认 LLM 判聚类不需要。需要时 `bash scripts/install.sh --with-local`。
 
-**只有上述五项齐备，才进入正式流水线。** 提醒时一次性列清所有缺失项，不要跑一步报一个错。
+**只有上述 1-4 项齐备，才进入正式流水线。** 提醒时一次性列清所有缺失项，不要跑一步报一个错。
 
 **环境齐备后，立即主动问用户要对标文章**："环境已就绪。请提供你想复刻的那个人的原文（建议 20 篇以上、每篇 300 字以上，文件或链接均可），我会基于这批原文重新提取风格基线，然后生成模仿文。"
 
@@ -60,14 +59,16 @@ python3 scripts/replicate.py --name <对象key> --corpus-dir <原文目录> \
 ## 完整流程（五步）
 
 ### ① 语料归一
-对象原文（.txt/.md/语料 JSON）由 `replicate.py --corpus-dir` 自动归并为 SPI dict + AoT 块。
+对象原文（.txt/.md/语料 JSON）由 `replicate.py --corpus-dir` 读入做 WFP 指纹（doc_id = 文件名 stem）。
+**replicate.py 不生成 AoT 块、也不触发任何 LLM 打分**：AoT 语料用 `$AOT_ROOT/scripts/prepare_corpus.py` 生成，SPI 直接逐篇喂 txt。
 语料要求：对象本人真实文本，建议 ≥20 篇、单篇 ≥300 字（不足时参考 `references/limits.md` 第 11 条兜底）。
 
 ### ② 三件套画像（各模块独立跑，可并行）
 
 **所有脚本都在各自 toolkit 的 scripts/ 目录下，直接调用，不要自己拼格式。**
 
-- **WFP 硬指标基线**：`replicate.py` 自动完成（逐篇指纹 + 聚合）。
+- **WFP 硬指标基线**：`replicate.py` 自动完成（逐篇指纹 + `field_map.aggregate_baseline` 聚合，<5 篇非空原文直接报错）。
+  口径（field_map v3）：原始词 TTR 不进 Delta（随篇长下降，用 STTR）；我:你、正:负比值 +1 平滑；6 个句长相关特征共享权重。
 - **SPI 人格**（需 DeepSeek key，`spi-quant` 已安装）：
   ```bash
   spi-quant profile --file <文章.txt> --out <profile.json>     # 逐篇打分
@@ -75,21 +76,27 @@ python3 scripts/replicate.py --name <对象key> --corpus-dir <原文目录> \
   ```
 - **AoT 思维**（需 key）：
   ```bash
-  python3 $AOT_ROOT/scripts/score_dimensions.py --full        # → 每人一个 {pid}.json（25维 top5）
-  python3 $AOT_ROOT/scripts/aggregate_profiles.py <scores_dir> --out people_profiles.json  # 汇总成 people_profiles.json
-  python3 $AOT_ROOT/scripts/score_criterion.py                 # → criterion_scores.json
-  python3 $AOT_ROOT/scripts/score_thinking.py                  # → thinking_scores.json
+  python3 $AOT_ROOT/scripts/prepare_corpus.py <原文目录> --person <pid> --name <人名>   # → $AOT_ROOT/data/corpus/<pid>.json
+  python3 $AOT_ROOT/scripts/score_dimensions.py --person <pid> --dry-run   # 先看调用次数
+  python3 $AOT_ROOT/scripts/score_dimensions.py --person <pid>             # → data/results/scores_dim_v2/<pid>.json（25 维，断点续跑）
+  python3 $AOT_ROOT/scripts/aggregate_profiles.py $AOT_ROOT/data/results/scores_dim_v2 \
+      --names <pid>=<人名> --out people_profiles.json                       # 人设卡用 --aot-person <人名>
+  # 可选：score_criterion.py（效标代理 → data/results/criterion/）、score_thinking.py（12 种子构念 → data/results/scores/）
+  # --full 只是改用 data/corpus_full 语料目录（需自己用 prepare_corpus.py --out-dir data/corpus_full 准备）
   ```
 - **WFP L3 软评分**（需 key）：
   ```bash
-  python3 $WFP_ROOT/scripts/score_stylistics.py --source spi  # → l3_baseline.json（17维）
+  python3 $WFP_ROOT/scripts/score_stylistics.py --corpus-dir <原文目录> --dry-run      # 先看调用次数
+  python3 $WFP_ROOT/scripts/score_stylistics.py --corpus-dir <原文目录> \
+      --out-dir <l3_scores> --l3-baseline-out l3_baseline.json                   # 17 维逐篇评分 + L3 基线
   ```
 - **WFP L4 隐喻识别**（需 key）：
   ```bash
-  python3 $WFP_ROOT/scripts/score_metaphor.py <文章.txt> --json  # → 12根域隐喻密度 + 例句
+  python3 $WFP_ROOT/scripts/score_metaphor.py <文章.txt> --out metaphor.json  # → 12 根域隐喻密度 + 例句（独立参考，不进 Delta/人设卡）
   ```
 
-无 key 时 SPI/AoT/L3/L4 这些 LLM 打分环节**直接报错退出**；只有 WFP L1/L2 纯规则硬指标可无 key 运行。
+无 key 时 SPI/AoT/L3/L4 这些 LLM 打分环节**直接报错退出（退出码 1）**；只有 WFP L1/L2 纯规则硬指标可无 key 运行。
+LLM 调用统一走各仓 `llm_common`：模型/温度/并发来自各仓 config，429/5xx/截断自动指数退避，输入超 6000 字截断并在结果里标 `truncated`；有打分项最终失败时退出码 3（重跑即续跑）。
 
 ### ③ 人设卡合成
 ```bash
@@ -101,6 +108,8 @@ python3 scripts/build_persona_generic.py --name <key> --display-name "人读名"
   --out-dir <输出目录>
 ```
 人设卡 = 人格底色（SPI top6 簇）+ 思维模式（AoT top5 维）+ 文风指纹（硬指标数值约束 + L3 软画像）+ **可直接投喂的生成指令模板**。所有输入可选，缺哪块就只合成哪块。
+`--people-baseline <块级基线.json> --people-key <key>`（可选）：篇章级基线缺某项硬指标时用块级值补齐（stderr 会列出补了哪些）。
+也可以一步到位：`replicate.py --name <key> --wfp-baseline <已有基线> --spi-clusters ... --aot-profiles ... --aot-person ... --l3-baseline ...`（无 `--corpus-dir` 时必须给 `--wfp-baseline`；L3 基线不能代替 WFP 基线）。
 
 ### ④ 生成模仿文
 按人设卡"四、生成指令模板"投喂 LLM（DeepSeek/豆包/Claude 等均可）。生成要求：
@@ -115,8 +124,8 @@ python3 scripts/build_persona_generic.py --name <key> --display-name "人读名"
 
 ### ⑤ 指纹回测
 ```bash
-<WFP_ROOT>/scripts/extract_hard_metrics.py <生成文.txt> --json > gen_fp.json
-<WFP_ROOT>/scripts/merge_fingerprint.py gen_fp.json --baseline <wfp_baseline_<key>.json> [--l3dir <l3_scores 目录>] --json
+python3 $WFP_ROOT/scripts/extract_hard_metrics.py <生成文.txt> --json > gen_fp.json
+python3 $WFP_ROOT/scripts/merge_fingerprint.py gen_fp.json --baseline <wfp_baseline_<key>.json> [--l3dir <l3_scores 目录>] --json
 ```
 判断口径：**Delta 越低越像**（同质长文实测：真实文基线 ~1.5 / 模仿文收敛至 ~1.3 / 对照文 ~7+，判别比可达 4×）。
 异质语料时 Delta 会失效（判别比≈1×），改用分层基线（≥800 字）或非参数判据。
@@ -127,15 +136,21 @@ python3 scripts/build_persona_generic.py --name <key> --display-name "人读名"
 
 **⚠️ 回测前必须先做判别力自检**（尺子不准，Delta 结果不可信）：
 ```bash
+# 手动：一条命令两关都跑（--control / --other-author 可以是文件或目录）
 python3 $WFP_ROOT/scripts/validate_discrimination.py \
   --baseline <基线.json> \
-  --held-out <原作者留出文章.txt> \
+  --held-out <原作者留出文章.txt（不能在基线语料里）> \
   --control <对照文.txt> \
   --other-author <另一作者文章.txt>
+# 自动：从「不在基线里」的原作者文章随机留出，与另一作者对比，多轮（seed 可复现）
+python3 $WFP_ROOT/scripts/validate_discrimination.py --baseline <基线.json> \
+  --corpus <原作者留出语料目录> --other-author <另一作者目录> --rounds 5 --seed 42
 ```
-- 留出集判别比 ≥1.5（原作者留出文应该明显比对照文好）
-- 异作者判别比 ≥1.2（另一作者应该明显比原作者差）
+- 关 1：留出 vs 对照判别比 ≥1.5（`--threshold`）；关 2：留出 vs 异作者判别比 ≥1.2（`--threshold-other`）；给了几关就要几关都过
+- 留出文若在基线的 `doc_ids` 里会被剔除（自己比自己没意义）；基线 <5 篇 / 可用特征 <10 / 空文本直接报错
+- 退出码：0 正常（结论看输出）、1 输入错误；加 `--strict` 时 FAIL 退出 2
 - **两关过不了，Delta 直接标"不可信"，不硬报数值**
+- 生成文偏项迭代：`python3 scripts/iterative_generate.py --baseline <基线> --gen-fp gen_fp.json --original-prompt <prompt.txt> --round 1`（修正要求用中文标签与增减方向）
 
 ## 交付报告必须包含的内容（不能自由发挥）
 
