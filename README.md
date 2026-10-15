@@ -1,95 +1,109 @@
 # wenbi-replica · 文笔复刻
 
-给定某人一批真实原文，产出该人风格的模仿文与可验证的画像报告。
+**给定某人一批真实原文，量化还原他的写作风格，并生成风格一致的新文案。**
 
-## 架构
+不是简单的"模仿语气"，而是从三个维度拆解一个人的文风：
+
+| 维度 | 模块 | 测什么 |
+|---|---|---|
+| **他是谁** | SPI（人格量化） | 32 个人格因子 × 15 个语义簇 → 情感温暖/行动导向/宜人性/神经质… |
+| **他怎么想** | AoT（思维模式） | 25 个思维维度 → 判断快/慢、论证链长短、是否写反例、是否自我怀疑… |
+| **他怎么说** | WFP（文风指纹） | 句长分布、问句频率、语气词密度、隐喻根域、叙事修辞软评分… |
+
+SPI + AoT 是「里」，解释作者内核；WFP 是「表」，数值化表层文风。三层合起来，才能从"像"到"是"。
+
+---
+
+## 流水线
 
 ```
-wenbi-replica（本仓）= 编排层：语料归一 → 三件套画像 → 人设卡 → 模仿文 → 回测
-├── spi-toolkit   人格底色（他是谁）
-├── aot-toolkit   思维模式（他怎么想）
-└──  v0.1.0  文风指纹（他怎么说）
+原文语料
+  ↓
+① 语料归一（自动）
+  ↓
+② 三件套画像
+  ├── SPI 人格量化（需 DeepSeek key）
+  ├── AoT 思维模式（需 DeepSeek key）
+  └── WFP 文风指纹（L1/L2 纯规则硬指标 + L3/L4 LLM 软评分）
+  ↓
+③ 人设卡合成
+  → 人格底色 + 思维模式 + 文风数值约束 + 生成指令模板
+  ↓
+④ 生成模仿文（投喂给任意 LLM）
+  ↓
+⑤ 回测校验
+  ├── 每千字归一化 Delta（排除篇幅偏差）
+  ├── Burrows Delta（高频虚词词频分布，真正区分作者）
+  └── 判别力自检（验证尺子准不准）
+  ↓
+迭代闭环：偏项自动写回 prompt → 再生成，最多 3 轮
 ```
 
-- SPI + AoT = **「里」**，解释作者内核
-- WFP = **「表」**，数值化表层文风
+---
 
 ## 快速开始
 
 ```bash
-# 1. 【第一优先】设置 DeepSeek API Key
-#    没有 key，人格/思维/隐喻打分全部跑不了（只有 L1/L2 纯规则硬指标能用）
-#    到 https://platform.deepseek.com/ 创建 key，然后：
+# 1. 设置 DeepSeek API Key
 export DEEPSEEK_API_KEY=sk-你的key
 
-# 2. 克隆三个 toolkit 并设置路径环境变量
-export SPI_ROOT=/path/to/spi-toolkit
-export AOT_ROOT=/path/to/aot-toolkit
-export WFP_ROOT=/path/to/wfp-toolkit
+# 2. 克隆四个仓库，设置路径
+git clone https://github.com/ghbeihai/wenbi-replica.git
+git clone https://github.com/ghbeihai/spi-toolkit.git
+git clone https://github.com/ghbeihai/aot-toolkit.git
+git clone https://github.com/ghbeihai/wfp-toolkit.git
 
-# 3. 安装依赖
-pip install jieba pyyaml numpy openai
-# SPI 作为可编辑包安装（提供 spi-quant CLI）
-cd $SPI_ROOT && pip install -e .
+export SPI_ROOT=./spi-toolkit
+export AOT_ROOT=./aot-toolkit
+export WFP_ROOT=./wfp-toolkit
 
-# 4. 最小闭环（仅 WFP L1/L2 硬指标，不调 LLM）
+# 3. 一键安装（Python 依赖 + Personality Atlas 1.1G + 3072 维嵌入 879M）
+bash scripts/install.sh
+
+# 4. 最小闭环（仅 WFP 硬指标，不调 LLM）
 python3 scripts/replicate.py --name alice \
-  --corpus-dir /path/to/alice_原文 \
+  --corpus-dir ./alice_原文 \
   --out-dir ./out
 
-# 5. 完整版（SPI 人格 + AoT 思维 + WFP L3/L4，全部调 DeepSeek）
-#    先跑各 toolkit 的打分脚本产出画像，再用 --spi-clusters / --aot-profiles 传入
+# 5. 完整版（SPI + AoT + WFP 全跑）
+#    先跑各 toolkit 的打分脚本，再把结果传给 replicate.py
 ```
+
+---
 
 ## 产出
 
-- `persona_<key>.json` — 结构化人设卡（程序消费）
-- `三件套人设卡_<key>.md` — 人读版 + 可直接投喂的生成指令模板
-- `wfp_baseline_<key>.json` — 文风指纹基线
-- 生成文回测 Delta
-
-## 环境变量
-
-| 变量 | 说明 |
+| 文件 | 说明 |
 |---|---|
-| `WFP_ROOT` |  v0.1.0根目录 |
-| `SPI_ROOT` | spi-toolkit 根目录 |
-| `AoT_ROOT` | aot-toolkit 根目录 |
-| `DEEPSEEK_API_KEY` | LLM 打分 key（无 key 自动进入模拟模式） |
+| `persona_<name>.json` | 结构化人设卡（程序消费） |
+| `三件套人设卡_<name>.md` | 人读版 + 可直接投喂的生成指令模板 |
+| `wfp_baseline_<name>.json` | 文风指纹基线（含 avg_chars） |
+| `回测结果.json` | Delta、判别比、逐项偏离 |
+
+---
+
+## 使用场景
+
+- **自媒体账号风格统一**：给主理人建文风画像，团队写稿不跑偏
+- **KOL/作家代写**：还原作者语气，写出来的东西像本人
+- **品牌内容调性**：把品牌创始人的"话风"量化成 prompt，新员工照着写
+- **教育/培训**：还原优秀教师的讲课风格，辅助备课
+
+---
 
 ## 未内置
 
-- **违禁词表**：使用方按自己行业（医疗/金融/教育…）自备，生成环节自行过滤。
-- **示例人物语料 / 旧基线**：每次使用都从当次输入的原文重新提取基线，不携带任何测试人物数据。
+- **违禁词表**：按自己行业（医疗/金融/教育…）自备，生成环节自行过滤
+- **测试人物语料**：每次使用都从当次输入的原文重新提取基线，不携带任何旧数据
+
+---
 
 ## 已知局限
 
 见 `references/limits.md`（精度边界、判别失效条件、语料要求、生成端校准结论）。
 
+---
+
 ## License
 
 MIT
-
-## 版本号规则
-
-每次 push 前更新 VERSION 文件：
-
-| 改动类型 | 版本号变化 | 示例 |
-|---|---|---|
-| 修 bug / 改文档 | PATCH +1 | 1.0.0 → 1.0.1 |
-| 新增功能 / 加脚本 | MINOR +1 | 1.0.0 → 1.1.0 |
-| 流水线大改 / 换框架 | MAJOR +1 | 1.0.0 → 2.0.0 |
-
-当前版本见根目录 `VERSION` 文件。
-
-## 配套 toolkit 版本
-
-当前主仓 v1.0.0 配套以下 toolkit 版本：
-
-| 仓库 | 版本 | 说明 |
-|---|---|---|
-| spi-toolkit | v0.1.1 | 人格量化（32 因子 × 15 聚类） |
-| aot-toolkit | v0.1.1 | 思维模式（25 维） |
-|  v0.1.0| v0.1.0 | 文风指纹（硬指标 + L3 软评分 + L4 隐喻） |
-
-版本错位可能导致脚本调用失败，升级时请同步更新。
