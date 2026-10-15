@@ -150,17 +150,28 @@ def load_wfp(wfp_baseline, l3_baseline, people_baseline, people_key, l3_config):
         if v is not None:
             hard[name] = round(v, 2)
 
+    # 其他字典字段（认知词/标点/隐喻根域/连接词）的 *_total
     for feat, name in [
-        ("L1_LEX_004_yqci_per_k", "语气词/千字(块级)"),
-        ("L2_DIS_002_conn_per_k", "衔接词/千字(块级)"),
-        ("L1_SYN_004_question_sents", "问句/千字(块级)"),
-        ("L1_LEX_005_dm", "话语标记/千字(块级)"),
-        ("L1_LEX_008_cog_per_k", "认知词/千字(块级)"),
-        ("L4_SUR_001_meta_per_k", "隐喻/千字(块级)"),
+        ("L1_LEX_008_cog_per_k_total", "认知词/千字"),
+        ("L1_SYN_003_punct_per_k_total", "标点/千字"),
+        ("L2_DIS_002_conn_per_k_total", "连接词/千字"),
+        ("L4_SUR_001_meta_domains_total", "隐喻根域总数/千字"),
     ]:
-        val = pick_people(feat)  # 与原版一致：块级特征存原值不额外舍入
-        if val is not None:
-            hard[name] = val
+        v = pick(feat)
+        if v is not None:
+            hard[name] = round(v, 2)
+
+    # 其他重要标量字段
+    for feat, name in [
+        ("L1_SYN_005_ba_per_k", "把字句/千字"),
+        ("L1_SYN_005_bei_per_k", "被字句/千字"),
+        ("L1_SYN_005_shi_de_per_k", "是...的/千字"),
+        ("L4_SUR_002_value_per_k", "价值词/千字"),
+        ("L4_SUR_003_pos_neg_ratio", "正负情感比"),
+    ]:
+        v = pick(feat)
+        if v is not None:
+            hard[name] = round(v, 2)
 
     l3 = {}
     dims = (l3_baseline or {}).get("baseline", {})
