@@ -36,6 +36,12 @@ WFP_SCRIPTS = os.path.join(WFP, "scripts")
 EXTRACT = os.path.join(WFP_SCRIPTS, "extract_hard_metrics.py")
 MERGE = os.path.join(WFP_SCRIPTS, "merge_fingerprint.py")
 PERSONA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "build_persona_generic.py")
+sys.path.insert(0, WFP_SCRIPTS)
+try:
+    # 与 validate/normalize/merge 共用同一口径（每千字、排除篇幅量与重复项）
+    from field_map import flatten as fm_flatten, FIELD_MAP_VERSION
+except ImportError:  # 旧版 wfp-toolkit 没有 flatten
+    fm_flatten, FIELD_MAP_VERSION = None, 1
 
 
 def scan_corpus(corpus_dir, limit):
@@ -112,6 +118,10 @@ def run_wfp_hard(items, out_dir, name):
                         r[f"{k}__{sub_k}"] = sub_v
                 # 同时保留总和
                 r[f"{k}_total"] = sum(x for x in v.values() if isinstance(x, (int, float)))
+        # Delta 口径字段（*_per_k / dm_per_k_total 等）：直接用 field_map.flatten 的结果覆盖，
+        # 保证基线与回测/自检完全同口径
+        if fm_flatten is not None:
+            r.update(fm_flatten(r))
 
     # 收集所有行的 int/float 字段（不只第一行）
     keys = set()
@@ -134,7 +144,7 @@ def run_wfp_hard(items, out_dir, name):
     avg_chars = round(statistics.mean(chars_list), 0) if chars_list else 0
 
     out = {"n_docs": len(rows), "corpus": name, "version": "wenbi-replica",
-           "avg_chars": int(avg_chars),
+           "avg_chars": int(avg_chars), "field_map_version": FIELD_MAP_VERSION,
            "note": "由文笔复刻 replicate.py 聚合生成", "baseline": baseline}
     bl_path = os.path.join(out_dir, f"wfp_baseline_{name}.json")
     json.dump(out, open(bl_path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
