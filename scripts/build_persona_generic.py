@@ -73,16 +73,21 @@ def spi_label_display(label, label_map=None):
     return fix.get(label, label)
 
 
-def load_aot(aot_profiles, person):
+def load_aot(aot_profiles, person, alt=None):
     """AoT 思维画像：按人名取 top5 维度（含证据）"""
     if not aot_profiles:
         print("[警告] AoT 画像文件为空，将跳过思维模式段。请检查 aggregate_profiles.py 是否跑通。", file=sys.stderr)
         return None
     target = None
+    # 依次匹配：人读名 name / 画像键 pid / pid 字段（aggregate_profiles --names 之后 name 为中文名）
     for k, v in aot_profiles.items():
-        if v.get("name") == person or k == person:
+        if person in (v.get("name"), k, v.get("pid")):
             target = v
             break
+    if not target and alt and alt in aot_profiles:
+        # 旧版画像 name==pid：用 --name（语料键）兜底，并提示
+        print(f"[提示] AoT 画像未找到 '{person}'，按 --name '{alt}' 匹配到画像键。", file=sys.stderr)
+        target = aot_profiles[alt]
     if not target:
         print(f"[警告] AoT 画像中未找到人名 '{person}'，将跳过思维模式段。可用人名：{list(aot_profiles.keys())}", file=sys.stderr)
         return None
@@ -132,19 +137,22 @@ def load_wfp(wfp_baseline, l3_baseline, people_baseline, people_key, l3_config):
         if val is not None:
             hard[name] = val
 
-    # 问句/修辞反问：按篇 → 每千字（避免篇幅陷阱）
-    if avg_chars > 0:
-        for feat, name in [("L1_SYN_004_question_sents", "问句/千字"),
-                           ("L1_SYN_004_rhet_sents", "修辞反问/千字")]:
-            v = pick(feat)
-            if v is not None:
-                hard[name] = round(v * 1000 / avg_chars, 2)
+    # 按篇计数 → 每千字（避免篇幅陷阱）：优先 field_map v2 的 *_per_k 字段，
+    # 旧基线（v1）退回用 avg_chars 近似换算
+    for new, legacy, name in [("L1_SYN_004_question_per_k", "L1_SYN_004_question_sents", "问句/千字"),
+                              ("L1_SYN_004_rhet_per_k", "L1_SYN_004_rhet_sents", "修辞反问/千字"),
+                              ("L1_LEX_005_dm_per_k_total", "L1_LEX_005_dm_total", "话语标记/千字")]:
+        v = pick(new)
+        if v is None and avg_chars > 0:
+            lv = pick(legacy)
+            v = lv * 1000 / avg_chars if lv is not None else None
+        if v is not None:
+            hard[name] = round(v, 2)
 
-    # 字典字段展开后的总和（语气词/人称代词/衔接词）
+    # 字典字段展开后的总和（语气词/人称代词）
     for feat, name in [
         ("L1_LEX_004_yqci_per_k_total", "语气词/千字"),
         ("L1_LEX_006_pron_per_k_total", "人称代词/千字"),
-        ("L1_LEX_005_dm_total", "话语标记/千字"),
     ]:
         v = pick(feat)
         if v is not None:
@@ -155,7 +163,7 @@ def load_wfp(wfp_baseline, l3_baseline, people_baseline, people_key, l3_config):
         ("L1_LEX_008_cog_per_k_total", "认知词/千字"),
         ("L1_SYN_003_punct_per_k_total", "标点/千字"),
         ("L2_DIS_002_conn_per_k_total", "连接词/千字"),
-        ("L4_SUR_001_meta_domains_total", "隐喻根域总数/千字"),
+        ("L4_SUR_001_meta_per_k", "隐喻/千字"),  # meta_domains_total 与之相同，只取一次
     ]:
         v = pick(feat)
         if v is not None:
@@ -196,7 +204,7 @@ def load_wfp(wfp_baseline, l3_baseline, people_baseline, people_key, l3_config):
                 meta_domains[domain] = mean
     if meta_domains:
         top_domains = sorted(meta_domains.items(), key=lambda x: -x[1])[:3]
-        hard["隐喻根域top3"] = "、".join(f"{d}({v}/千字)" for d, v in top_domains)
+        hard["隐喻根域top3"] = "、".join(f"{d}({round(v, 2)}/千字)" for d, v in top_domains)
 
     return hard, l3
 
@@ -221,11 +229,13 @@ def build_prompt(persona, hard, l3, aot, spi, label_map=None):
                 s += f"，长句>40字约占{round(hard['长句>40字占比'] * 100, 1)}%"
             segs.append(s)
         for feat in ["我:你", "语气词/千字", "人称代词/千字", "话语标记/千字", "认知词/千字",
-                     "标点/千字", "连接词/千字", "隐喻根域总数/千字",
+                     "标点/千字", "连接词/千字", "隐喻/千字", "隐喻根域top3",
                      "正情/千字", "负情/千字", "四字格/千字", "问句/千字", "修辞反问/千字",
                      "把字句/千字", "被字句/千字", "是...的/千字", "价值词/千字"]:
             if hard.get(feat) is not None:
-                if feat == "我:你":
+                if feat == "隐喻根域top3":
+                    segs.append(f"隐喻根域偏好 {hard[feat]}")
+                elif feat == "我:你":
                     segs.append(f"我:你比例{max(0.5, hard[feat]-1):.1f}-{hard[feat]+1:.1f}（目标 {hard[feat]}）")
                 else:
                     segs.append(f"{feat}≈{hard[feat]}")
@@ -336,7 +346,7 @@ def main():
     aot_data = load_json(args.aot_profiles)
     if aot_data is not None:
         schemas.validate_aot_profiles(aot_data)
-    aot = load_aot(aot_data, args.aot_person)
+    aot = load_aot(aot_data, args.aot_person, alt=args.name)
 
     # 加载并校验 WFP
     wfp_data = load_json(args.wfp_baseline)
