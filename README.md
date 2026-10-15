@@ -57,7 +57,7 @@ python3 scripts/replicate.py --name alice \
 | `AoT_ROOT` | aot-toolkit 根目录 |
 | `DEEPSEEK_API_KEY` | LLM 打分 key（无 key 自动进入模拟模式） |
 
-## 不内置什么
+## 未内置
 
 - **违禁词表**：使用方按自己行业（医疗/金融/教育…）自备，生成环节自行过滤。
 - **示例人物语料 / 旧基线**：每次使用都从当次输入的原文重新提取基线，不携带任何测试人物数据。
