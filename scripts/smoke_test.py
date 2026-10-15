@@ -535,8 +535,11 @@ def _gen_config(tmp: Path, a_dir: Path, bl_path: Path, persona_md: Path):
           "closed_loop：L3 偏差进回灌（有显著偏差时）")
     leaked = []
     for h in rep["rounds"][:-1]:
-        nxt = (lp / f"round_{h['round'] + 1}_prompt.txt").read_text(encoding="utf-8").split("【上一稿文风偏差")[-1]
-        leaked += [f["label"] for f in h["feedback"] if f.get("relaxed") and f["label"] in nxt]
+        raw = (lp / f"round_{h['round'] + 1}_prompt.txt").read_text(encoding="utf-8")
+        # 只检查「表层文风」回灌段（思维依从段不应含 WFP 特征名）
+        nxt = raw.split("【上一稿表层文风")[-1] if "【上一稿表层文风" in raw else raw.split("【上一稿文风偏差")[-1]
+        # 放松特征的修正措辞不该出现；「仅报告」可以在报告里
+        leaked += [f["label"] for f in h["feedback"] if f.get("relaxed") and (f["label"]+"：") in nxt and "不强制修正" not in nxt.split(f["label"]+"：",1)[-1][:40]]
     n_rel = sum(len(h["relaxed_deviations"]) for h in rep["rounds"])
     md = (lp / "loop_report.md").read_text(encoding="utf-8")
     check(not leaked and set(rep["relaxed_features"]) >= {"L1_SYN_003_punct_per_k_total"}
@@ -563,6 +566,41 @@ def _gen_config(tmp: Path, a_dir: Path, bl_path: Path, persona_md: Path):
     r = run([sys.executable, SCRIPT_DIR / "wenbi.py", "doctor", "--corpus-dir", one, "--json"], expect_rc=1,
             env=dict(nok, DEEPSEEK_API_KEY=fake))
     check(json.loads(r.stdout)["stage"] == "need_corpus", "doctor：语料不足 5 篇 → 阻塞并提示补原文")
+    # SPI+AoT 先导：大纲进 prompt；依从主尺；选最佳看依从
+    pj = tmp / "out_full" / "persona_full.json"
+    if not pj.exists():
+        # 最小 persona（仅 SPI/AoT 字段）供大纲
+        pj = tmp / "persona_min.json"
+        pj.write_text(json.dumps({
+            "name": "smoke", "display_name": "样例",
+            "spi_personality": [{"label": "Analytical Cognition", "n_first": 2, "n_top5": 3, "avg_relevance": 5}],
+            "aot_thinking": [{"dim_name": "抽象-具体转换", "mean": 5.5, "evidence": ["先讲清楚再举例"]}],
+            "wfp_style": {"hard": {}, "l3": {}},
+        }, ensure_ascii=False), encoding="utf-8")
+    lo2 = tmp / "loop_spi_first"
+    run([sys.executable, SCRIPT_DIR / "closed_loop.py", "--persona-md", persona_md, "--persona-json", pj,
+         "--baseline", bl_path, "--purpose", "口播稿", "--topic", "维生素怎么吃", "--length", "600",
+         "--corpus-dir", a_dir, "--out-dir", lo2, "--rounds", "2"], env=MOCK)
+    r2 = json.loads((lo2 / "loop_report.json").read_text(encoding="utf-8"))
+    p1 = (lo2 / "round_1_prompt.txt").read_text(encoding="utf-8")
+    check((lo2 / "outline.json").exists() and "思维大纲" in p1 and p1.find("思维大纲") < p1.find("【写作要求】"),
+          "SPI+AoT 先导：先产出 outline，且大纲块在写作要求之前")
+    check(r2.get("best_adherence") is not None and "adherence" in r2["rounds"][0]
+          and "SPI+AoT" in (lo2 / "loop_report.md").read_text(encoding="utf-8"),
+          f"闭环主尺=思维依从（最佳依从 {r2.get('best_adherence')}），报告标明 SPI+AoT 先导")
+    if (lo2 / "round_2_prompt.txt").exists():
+        p2 = (lo2 / "round_2_prompt.txt").read_text(encoding="utf-8")
+        check("思维依从" in p2 and p2.find("思维依从") < p2.find("表层文风"),
+              "回灌：思维依从块在表层文风之前")
+    # 人设卡第四节顺序：SPI/AoT 在 WFP 数值前
+    md_full = (tmp / "out_full" / "三件套人设卡_full.md")
+    if md_full.exists():
+        md = md_full.read_text(encoding="utf-8")
+        sec = md.split("## 四、")[-1]
+        check(sec.find("人格底色") < sec.find("表层说法") or sec.find("SPI") < sec.find("WFP")
+              or "生成顺序" in sec,
+              "人设卡第四节：SPI/AoT 先导说明在 WFP 表层之前")
+
     r = run([sys.executable, SCRIPT_DIR / "replicate.py", "--name", "nx", "--corpus-dir", a_dir, "--out-dir", tmp / "out_nx",
              "--genre", "off"])
     check("生成前请确定" in r.stdout and "--purpose" in r.stdout, "replicate 训练完成后提示用户确定用途/字数/题目")

@@ -231,19 +231,33 @@ def round3(x): return round(x, 3)
 
 
 def build_prompt(persona, hard, l3, aot, spi, label_map=None):
-    """动态生成可直接投喂的生成指令模板：数值缺失的约束自动省略。"""
+    """动态生成可直接投喂的生成指令模板。
+    顺序硬规则：SPI/AoT（里：他是谁/怎么想）在前，WFP（表：怎么说）在后且仅作表层。
+    正式生成时 closed_loop 还会就本题先跑 SPI+AoT 思维大纲，再套本模板的表层约束。"""
     parts = []
+    parts.append("【生成顺序】先按人格与思维想清楚本题（SPI+AoT），再按数值约束落成文字（WFP 只负责表层，不得主导立意与结构）。")
+
+    if spi:
+        labels = [spi_label_display(c["label"], label_map) for c in spi if c.get("label")]
+        if labels:
+            parts.append("【人格底色 · SPI｜先导】" + "（" + "、".join(labels[:6]) + "）。"
+                         "写之前先问：此人会从哪些生活域/认知习惯切入本题？")
+
+    if aot:
+        segs = [f"{t['dim_name']}（{t['mean']}）" for t in aot]
+        parts.append("【思维底色 · AoT｜先导】" + "；".join(segs) + "（高维多用、低维少用）。"
+                     "写之前先定：本题的拆解顺序、判断口径与收束，必须对齐这些维。")
 
     if hard:
         segs = []
         v = hard.get("平均句长")
         if v is not None:
-            s = f"平均句长{v-5:.0f}-{v+5:.0f}字（目标 {v} 字）"
+            s0 = f"平均句长{v-5:.0f}-{v+5:.0f}字（目标 {v} 字）"
             if hard.get("短句<10字占比") is not None:
-                s += f"（短句<10字约占{round(hard['短句<10字占比'] * 100, 1)}%）"
+                s0 += f"（短句<10字约占{round(hard['短句<10字占比'] * 100, 1)}%）"
             if hard.get("长句>40字占比") is not None:
-                s += f"，长句>40字约占{round(hard['长句>40字占比'] * 100, 1)}%"
-            segs.append(s)
+                s0 += f"，长句>40字约占{round(hard['长句>40字占比'] * 100, 1)}%"
+            segs.append(s0)
         for feat in ["我:你", "语气词/千字", "人称代词/千字", "话语标记/千字", "认知词/千字",
                      "标点/千字", "连接词/千字", "隐喻/千字", "隐喻根域top3",
                      "正情/千字", "负情/千字", "四字格/千字", "问句/千字", "修辞反问/千字",
@@ -255,7 +269,8 @@ def build_prompt(persona, hard, l3, aot, spi, label_map=None):
                     segs.append(f"我:你比例{max(0.5, hard[feat]-1):.1f}-{hard[feat]+1:.1f}（目标 {hard[feat]}）")
                 else:
                     segs.append(f"{feat}≈{hard[feat]}")
-        parts.append("【数值约束】" + "；".join(segs) + "。")
+        parts.append("【表层说法 · WFP｜次要】" + "；".join(segs) + "。"
+                     "仅约束怎么说，不能改变上面的人格/思维与本题大纲。")
 
     if l3:
         sorted_l3_desc = sorted(l3.items(), key=lambda x: -x[1])
@@ -265,22 +280,13 @@ def build_prompt(persona, hard, l3, aot, spi, label_map=None):
         segs = [f"{k} {v}" for k, v in top6]
         if low_dims:
             low_segs = [f"{k} ≤{v+0.5:.1f}分（少用，不超过上限）" for k, v in low_dims]
-            parts.append("【软画像】高分：" + "、".join(segs) + "；低分：" + "、".join(low_segs) + "（1–7 分）。")
+            parts.append("【表层软画像 · WFP L3｜次要】高分：" + "、".join(segs) + "；低分：" + "、".join(low_segs) + "（1–7 分）。")
         else:
-            parts.append("【软画像】" + "（" + "、".join(segs) + "，1–7 分，按目标值对齐，避免顶格）。")
+            parts.append("【表层软画像 · WFP L3｜次要】" + "（" + "、".join(segs) + "，1–7 分）。")
 
-    if aot:
-        segs = [f"{t['dim_name']}（{t['mean']}）" for t in aot]
-        parts.append("【思维底色】" + "；".join(segs) + "（按分数对齐：高维多用、低维少用）。")
-
-    if spi:
-        labels = [spi_label_display(c["label"], label_map) for c in spi if c.get("label")]
-        if labels:
-            parts.append("【人格底色】" + "（" + "、".join(labels[:6]) + "）。")
-
-    parts.append("【人称提示】多用'我'讲自己的经历和感受，少用'你'直接喊话或说教。目标我:你比例见上方数值约束。")
+    parts.append("【人称提示】多用'我'讲自己的经历和感受，少用'你'直接喊话或说教。目标我:你比例见表层数值约束。")
     parts.append("【few-shot 示例】（请从原作者语料里挑 2-3 段最有代表性的原文贴在这里，优先选第一人称叙述多的段落，比纯数值约束更有效）：")
-    parts.append("【禁止】不书面化（不用'综上所述'等）；不堆隐喻；不顶格宣泄；不列一二三。")
+    parts.append("【禁止】不书面化（不用'综上所述'等）；不堆隐喻；不顶格宣泄；不列一二三；不得用文风数值推翻人格/思维大纲。")
     return "\n".join(parts)
 
 
@@ -301,8 +307,10 @@ def render_md(persona, hard, l3, aot, spi, prompt):
         for w in persona.get("warnings") or []:
             add(f"> - {w}")
         add("")
+    add("> **生成顺序**：① SPI+AoT 先定本题怎么想（思维大纲）→ ② WFP 只负责表层怎么说。不要让句长/标点主导立意。")
+    add("")
     if spi:
-        add("## 一、人格底色（SPI：他是谁）")
+        add("## 一、人格底色（SPI：他是谁｜先导）")
         add("")
         add("| 语义簇 | 首命中 | 前5 | 相关度 |")
         add("|---|---|---|---|")
@@ -310,14 +318,14 @@ def render_md(persona, hard, l3, aot, spi, prompt):
             add(f"| {c['label']} | {c['n_first']} | {c['n_top5']} | {c['avg_relevance']} |")
         add("")
     if aot:
-        add("## 二、思维模式（AoT：他怎么想）")
+        add("## 二、思维模式（AoT：他怎么想｜先导）")
         add("")
         for t in aot:
             ev = t["evidence"][0][:40] if t.get("evidence") else ""
             add(f"- **{t['dim_name']}**（{t['mean']}/7）：如「{ev}」")
         add("")
     if hard or l3:
-        add("## 三、文风指纹（WFP：他怎么说）")
+        add("## 三、文风指纹（WFP：他怎么说｜表层，次要）")
         add("")
     if hard:
         add("### 硬指标数值约束（L1/L2/L4）")
@@ -336,7 +344,7 @@ def render_md(persona, hard, l3, aot, spi, prompt):
         top6 = sorted(l3.items(), key=lambda x: -x[1])[:6]
         add("、" .join(f"{k} {v}" for k, v in top6) + "（其余维见 L3 基线 JSON）")
         add("")
-    add("## 四、生成指令模板（可直接投喂）")
+    add("## 四、生成指令模板（可直接投喂｜先 SPI/AoT 再 WFP 表层）")
     add("")
     add('"""')
     add(prompt)

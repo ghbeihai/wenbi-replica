@@ -146,6 +146,13 @@ python3 scripts/build_persona_generic.py --name <key> --display-name "人读名"
 也可以一步到位：`replicate.py --name <key> --wfp-baseline <已有基线> --spi-clusters ... --aot-profiles ... --aot-person ... --l3-baseline ...`（无 `--corpus-dir` 时必须给 `--wfp-baseline`；L3 基线不能代替 WFP 基线）。
 
 ### ④ 生成模仿文（先问清用途/平台、字数、题目）
+
+**生成顺序硬规则（SPI+AoT 先导，WFP 表层）**：
+1. 就本题用人格簇（SPI）+ 思维维（AoT）产出**思维大纲**（立场/框架/拆解/必含/禁区）——这是硬约束；
+2. 再用 WFP 数值与软画像约束**怎么说**（句长、语气词、标点等）——不得主导立意；
+3. 闭环主尺=思维依从分（LLM 对照大纲，1–7），次尺=WFP 综合分；回灌时先改思路再改文风。
+`closed_loop.py` 默认先跑 `topic_outline.py`（需 `persona_*.json`）；不要再暗示「文风数值主导生成」。
+
 生成配置由用户在生成时决定（命令行 > `--gen-config` 配置文件 > 用途预设）：
 
 | 字段 | 参数 | 说明 |
