@@ -29,6 +29,8 @@ WFP = os.environ.get("WFP_ROOT", "")
 L3_CONFIG_DEFAULT = os.path.join(WFP, "config/l3_dimensions.yaml") if WFP else ""
 
 
+import schemas
+
 def load_json(path):
     if not path or not os.path.exists(path):
         return None
@@ -91,9 +93,10 @@ def load_aot(aot_profiles, person):
 
 
 def load_wfp(wfp_baseline, l3_baseline, people_baseline, people_key, l3_config):
-    """WFP 硬指标数值约束 + L3 软画像。所有特征键均容错，缺失即跳过。"""
+    """WFP 硬指标数值约束 + L3 软画像。"""
     hard = {}
     bl = (wfp_baseline or {}).get("baseline", {})
+    avg_chars = (wfp_baseline or {}).get("avg_chars", 0) or 0
 
     def pick(feat, fmt=None):
         try:
@@ -117,11 +120,9 @@ def load_wfp(wfp_baseline, l3_baseline, people_baseline, people_key, l3_config):
     if v is not None:
         hard["平均句长"] = v
     for feat, name, fmt in [
-        ("L1_SYN_002_short_lt10", "短句<10字占比", round3),   # 与原版一致：存小数、round3
+        ("L1_SYN_002_short_lt10", "短句<10字占比", round3),
         ("L1_SYN_002_long_gt40", "长句>40字占比", round3),
-        ("L1_SYN_004_question_sents", "问句/篇", round1),
-        ("L1_SYN_004_rhet_sents", "修辞反问/篇", round1),
-        ("L1_LEX_006_wo_ni_ratio", "我:你", None),          # 原版未舍入，保持原值
+        ("L1_LEX_006_wo_ni_ratio", "我:你", None),
         ("L1_LEX_007_pos_per_k", "正情/千字", round1),
         ("L1_LEX_007_neg_per_k", "负情/千字", round2),
         ("L1_SYN_006_fourchar_per_k", "四字格/千字", round2),
@@ -130,6 +131,24 @@ def load_wfp(wfp_baseline, l3_baseline, people_baseline, people_key, l3_config):
         val = pick(feat, fmt)
         if val is not None:
             hard[name] = val
+
+    # 问句/修辞反问：按篇 → 每千字（避免篇幅陷阱）
+    if avg_chars > 0:
+        for feat, name in [("L1_SYN_004_question_sents", "问句/千字"),
+                           ("L1_SYN_004_rhet_sents", "修辞反问/千字")]:
+            v = pick(feat)
+            if v is not None:
+                hard[name] = round(v * 1000 / avg_chars, 2)
+
+    # 字典字段展开后的总和（语气词/人称代词/衔接词）
+    for feat, name in [
+        ("L1_LEX_004_yqci_per_k_total", "语气词/千字"),
+        ("L1_LEX_006_pron_per_k_total", "人称代词/千字"),
+        ("L1_LEX_005_dm_total", "话语标记/千字"),
+    ]:
+        v = pick(feat)
+        if v is not None:
+            hard[name] = round(v, 2)
 
     for feat, name in [
         ("L1_LEX_004_yqci_per_k", "语气词/千字(块级)"),
@@ -281,9 +300,27 @@ def main():
     args = ap.parse_args()
 
     label_map = load_json(args.spi_label_map)
-    spi = load_spi(load_json(args.spi_clusters))
-    aot = load_aot(load_json(args.aot_profiles), args.aot_person)
-    hard, l3 = load_wfp(load_json(args.wfp_baseline), load_json(args.l3_baseline),
+
+    # 加载并校验 SPI
+    spi_data = load_json(args.spi_clusters)
+    if spi_data is not None:
+        schemas.validate_spi_clusters(spi_data)
+    spi = load_spi(spi_data)
+
+    # 加载并校验 AoT
+    aot_data = load_json(args.aot_profiles)
+    if aot_data is not None:
+        schemas.validate_aot_profiles(aot_data)
+    aot = load_aot(aot_data, args.aot_person)
+
+    # 加载并校验 WFP
+    wfp_data = load_json(args.wfp_baseline)
+    if wfp_data is not None:
+        schemas.validate_wfp_baseline(wfp_data)
+    l3_data = load_json(args.l3_baseline)
+    if l3_data is not None:
+        schemas.validate_l3_baseline(l3_data)
+    hard, l3 = load_wfp(wfp_data, l3_data,
                         load_json(args.people_baseline), args.people_key, args.l3_config)
 
     if not (spi or aot or hard or l3):

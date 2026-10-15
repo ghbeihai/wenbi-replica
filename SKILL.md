@@ -162,6 +162,7 @@ python3 $WFP_ROOT/scripts/validate_discrimination.py \
 - 叙事套路不在三件套内：用**对象原文 few-shot + 体裁分析**补足。
 
 ## 参考文件
+- `references/field_contract.md` —— **字段命名规范（接口契约）**：所有中间文件的字段名、格式、错误处理原则，改脚本前必读。
 - `references/limits.md` —— 已知局限与适用边界（**使用前必读**：精度边界、判别失效条件、评分器缺陷、运行条件、生成端校准结论）。
 - `references/input_formats.md` —— 三模块语料/画像/基线的 JSON 结构与全部调用命令速查。
 
