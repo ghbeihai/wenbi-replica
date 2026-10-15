@@ -113,7 +113,13 @@ def run_wfp_hard(items, out_dir, name):
                 # 同时保留总和
                 r[f"{k}_total"] = sum(x for x in v.values() if isinstance(x, (int, float)))
 
-    keys = [k for k in rows[0] if isinstance(rows[0][k], (int, float))]
+    # 收集所有行的 int/float 字段（不只第一行）
+    keys = set()
+    for r in rows:
+        for k, v in r.items():
+            if isinstance(v, (int, float)):
+                keys.add(k)
+    keys = sorted(keys)
     baseline = {}
     for k in keys:
         vals = [r[k] for r in rows if isinstance(r.get(k), (int, float)) and r[k] is not None]
