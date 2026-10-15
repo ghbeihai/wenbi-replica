@@ -142,8 +142,8 @@ def run_wfp_hard(items, out_dir, name, min_docs=5):
     try:
         out = aggregate_baseline(rows, name=name, min_docs=min_docs, version="wenbi-replica")
     except DegenerateBaseline as e:
-        print(f"错误：{e}。请提供 ≥{min_docs} 篇非空原文（或显式 --min-docs 降低门槛，后果自负）。",
-              file=sys.stderr)
+        print(f"错误：{e}。请提供更多（≥5 篇、内容有差异的）非空原文；--min-docs 只能放宽篇数门槛，"
+              f"sd=0 的特征仍不可用。", file=sys.stderr)
         sys.exit(1)
     out["note"] = "由文笔复刻 replicate.py 聚合生成（field_map.aggregate_baseline）"
     bl_path = os.path.join(out_dir, f"wfp_baseline_{name}.json")
