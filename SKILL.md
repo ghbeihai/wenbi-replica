@@ -125,6 +125,18 @@ python3 scripts/build_persona_generic.py --name <key> --display-name "人读名"
 
 `replicate.py --backtest <生成文.txt>` 可自动完成 ⑤。
 
+**⚠️ 回测前必须先做判别力自检**（尺子不准，Delta 结果不可信）：
+```bash
+python3 $WFP_ROOT/scripts/validate_discrimination.py \
+  --baseline <基线.json> \
+  --held-out <原作者留出文章.txt> \
+  --control <对照文.txt> \
+  --other-author <另一作者文章.txt>
+```
+- 留出集判别比 ≥1.5（原作者留出文应该明显比对照文好）
+- 异作者判别比 ≥1.2（另一作者应该明显比原作者差）
+- **两关过不了，Delta 直接标"不可信"，不硬报数值**
+
 ## 交付报告必须包含的内容（不能自由发挥）
 
 最终给用户的文风画像报告，必须包含以下 5 部分，缺任何一项都要说明原因：

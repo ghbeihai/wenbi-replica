@@ -48,9 +48,17 @@ SPI_LABEL_FIX = {
 
 def load_spi(spi_clusters):
     """SPI 聚类画像：取命中前 6 语义簇（保留原始 label）"""
-    if not spi_clusters or "cluster_summary" not in spi_clusters:
+    if not spi_clusters:
+        print("[警告] SPI 画像文件为空，将跳过人格底色段。请检查 aggregate_spi_profiles.py 是否跑通。", file=sys.stderr)
         return None
-    cs = sorted(spi_clusters["cluster_summary"], key=lambda c: -c.get("n_first", 0))
+    if "cluster_summary" not in spi_clusters:
+        print("[警告] SPI 画像文件缺 cluster_summary 字段，将跳过人格底色段。请检查输入格式。", file=sys.stderr)
+        return None
+    cs = spi_clusters["cluster_summary"]
+    if not cs:
+        print("[警告] SPI cluster_summary 为空，将跳过人格底色段。", file=sys.stderr)
+        return None
+    cs = sorted(cs, key=lambda c: -c.get("n_first", 0))
     return [{"cluster": c["cluster"], "label": c.get("label", ""),
              "n_first": c.get("n_first", 0), "n_top5": c.get("n_top5", 0),
              "avg_relevance": c.get("avg_relevance", 0)} for c in cs[:6]]
@@ -66,6 +74,7 @@ def spi_label_display(label, label_map=None):
 def load_aot(aot_profiles, person):
     """AoT 思维画像：按人名取 top5 维度（含证据）"""
     if not aot_profiles:
+        print("[警告] AoT 画像文件为空，将跳过思维模式段。请检查 aggregate_profiles.py 是否跑通。", file=sys.stderr)
         return None
     target = None
     for k, v in aot_profiles.items():
@@ -73,6 +82,7 @@ def load_aot(aot_profiles, person):
             target = v
             break
     if not target:
+        print(f"[警告] AoT 画像中未找到人名 '{person}'，将跳过思维模式段。可用人名：{list(aot_profiles.keys())}", file=sys.stderr)
         return None
     top = [{"dim": t.get("dim", ""), "dim_name": t.get("dim_name", ""),
             "mean": t.get("mean", 0), "evidence": (t.get("evidence") or [])[:2]}
