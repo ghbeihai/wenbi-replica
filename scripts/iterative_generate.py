@@ -14,27 +14,37 @@
 """
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
+_WFP = os.environ.get("WFP_ROOT", "")
+if _WFP:
+    sys.path.insert(0, os.path.join(_WFP, "scripts"))
+try:
+    from field_map import flatten as _flatten, baseline_stat as _bstat
+except ImportError:  # 没有 WFP_ROOT / 旧版 wfp：退回原始字段逐项对比
+    _flatten = _bstat = None
+
 
 def find_top_deviations(gen_fp: dict, baseline: dict, top_n: int = 5) -> list:
-    """找出偏得最多的 top_n 项"""
+    """找出偏得最多的 top_n 项。有 field_map 时与回测同口径（每千字、字典求和、排除篇幅量）。"""
     bl = baseline.get("baseline", baseline)
     deviations = []
+    vec = _flatten(gen_fp) if _flatten else gen_fp
 
-    for k, v in gen_fp.items():
+    for k, v in vec.items():
         if not isinstance(v, (int, float)):
             continue
-        if k not in bl:
-            continue
-        bl_v = bl[k]
-        if isinstance(bl_v, dict):
-            mean = bl_v.get("mean", 0)
-            sd = bl_v.get("sd", 0)
+        if _bstat:
+            st = _bstat(baseline, k)
+            if not st:
+                continue
+            mean, sd = st
+        elif k in bl and isinstance(bl[k], dict):
+            mean, sd = bl[k].get("mean", 0), bl[k].get("sd", 0)
         else:
-            mean = bl_v
-            sd = 0
+            continue
 
         if sd > 0:
             z = abs(v - mean) / sd
@@ -105,7 +115,7 @@ def main():
     for d in deviations:
         print(f"  {d['feature']}: {d['direction']}（{d['gen_value']} vs 目标 {d['target_mean']}，z={d['z_score']}）")
 
-    print(f"\n修正后的 prompt（喂给 LLM 生成下一版）：")
+    print("\n修正后的 prompt（喂给 LLM 生成下一版）：")
     print("-" * 50)
     print(corrected_prompt)
     print("-" * 50)
