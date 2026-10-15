@@ -12,6 +12,8 @@ Smoke test：用仓库内小样例（tests/fixtures/smoke，合成语料）端�
  6. iterative_generate（人读标签）、build_l3_baseline（含失败分过滤、空目录报错）
  7. 边界：单篇/空文本/退化基线报错、无 jieba 告警被转发、--summary 与 replicate 基线逐项相同、
     手动两关、自动模式 seed 可复现 + 基线重叠剔除
+ 9. v3opt：体裁识别 + 语料闸门 + 同体裁回测；指纹/LLM/基线缓存命中；ruler extend/learn/score + 隐喻并入；
+    validate_discrimination --weights；LLM 盲测尺（mock）；生成闭环 closed_loop（mock，≤3 轮、保留最佳）
  8. 离线 mock LLM（WENBI_MOCK_LLM=flaky，首个请求 429 → 退避重试）：L3 score_stylistics + --l3-baseline-out、
     score_metaphor、SPI spi-quant spi/profile + aggregate_spi_profiles、AoT prepare_corpus + score_dimensions +
     aggregate_profiles，最后三模块合成人设卡并全量 schema 校验（找不到 SPI/AoT 仓库时这两段跳过并提示）
@@ -92,6 +94,8 @@ def main():
     check(len(list(a_dir.glob("*.txt"))) >= 10 and len(list(b_dir.glob("*.txt"))) >= 2,
           f"fixture 就位（{a_dir}）")
     tmp = Path(tempfile.mkdtemp(prefix="wenbi_smoke_"))
+    for e in (ENV, MOCK):  # 每次 smoke 用全新缓存目录（否则 mock 429 重试会被缓存命中跳过）
+        e["WENBI_CACHE_DIR"] = str(tmp / "cache")
     print(f"=== Smoke Test（WFP_ROOT={WFP_ROOT}，临时目录 {tmp}）===")
     try:
         _run_all(tmp, a_dir, b_dir)
@@ -110,7 +114,7 @@ def _run_all(tmp: Path, a_dir: Path, b_dir: Path):
     # 1. replicate：基线 + 人设卡
     out = tmp / "out"
     run([sys.executable, SCRIPT_DIR / "replicate.py", "--name", "smoke", "--display-name", "样例作者",
-         "--corpus-dir", a_dir, "--out-dir", out])
+         "--corpus-dir", a_dir, "--out-dir", out, "--genre", "off"])
     bl_path = out / "wfp_baseline_smoke.json"
     bl = json.loads(bl_path.read_text(encoding="utf-8"))
     check(bl.get("field_map_version") == field_map.FIELD_MAP_VERSION, "基线 field_map_version 与 field_map 一致")
@@ -194,6 +198,7 @@ def _run_all(tmp: Path, a_dir: Path, b_dir: Path):
 
     _edge_cases(tmp, a_dir, b_dir, bl_path, held)
     _mock_llm(tmp, a_dir, bl_path)
+    _v3opt(tmp, a_dir, b_dir, bl_path)
 
 
 def _edge_cases(tmp: Path, a_dir: Path, b_dir: Path, bl_path: Path, held: Path):
@@ -338,6 +343,127 @@ def _mock_llm(tmp: Path, a_dir: Path, bl_path: Path):
         vcmd += ["--aot", aot_bl]
     run(vcmd)
     ok("validate_schemas 全模块通过")
+
+
+def _v3opt(tmp: Path, a_dir: Path, b_dir: Path, bl_path: Path):
+    import field_map
+    ex = WFP_SCRIPTS / "extract_hard_metrics.py"
+    gdir = tmp / "genre"
+    gdir.mkdir()
+    samples = {
+        "poetry": "春风又绿江南岸\n明月何时照我还\n\n独在异乡为异客\n每逢佳节倍思亲\n\n山重水复疑无路\n柳暗花明又一村\n",
+        "dialogue": "甲：你今天去哪儿了？\n乙：我去图书馆了。\n甲：借了什么书？\n乙：一本小说。\n甲：好看吗？\n乙：还行吧。\n",
+        "news": "新华社北京10月15日电 记者从有关部门获悉，截至9月底，全国已建成5G基站300万个。据介绍，"
+                "相关负责人表示，下一步将继续推进网络建设。据统计，同比增长12%。\n",
+    }
+    for k, t in samples.items():
+        (gdir / f"{k}.txt").write_text(t, encoding="utf-8")
+    gj = json.loads(run([sys.executable, WFP_SCRIPTS / "genre.py", "--dir", gdir, "--json"]).stdout)
+    got = {d: v["genre"] for d, v in gj["docs"].items()}
+    check(all(got.get(k) == k for k in samples), f"genre.py 规则识别 诗歌/对话/新闻（{got}）")
+    gl = json.loads(run([sys.executable, WFP_SCRIPTS / "genre.py", gdir / "poetry.txt", "--llm", "--json"],
+                        env=MOCK).stdout)
+    check(bool(gl), "genre.py --llm（mock）跑通")
+    # 体裁闸门：混合语料（a 10 篇 + 3 篇异体裁）→ 主体裁基线 + 告警
+    mix = tmp / "mix"
+    shutil.copytree(a_dir, mix)
+    for k in samples:
+        shutil.copy(gdir / f"{k}.txt", mix / f"z_{k}.txt")
+    og = tmp / "out_genre"
+    r = run([sys.executable, SCRIPT_DIR / "replicate.py", "--name", "g", "--corpus-dir", mix, "--out-dir", og,
+             "--backtest", gdir / "news.txt"])
+    rep = json.loads((og / "genre_report.json").read_text(encoding="utf-8"))
+    main_bl = json.loads((og / "wfp_baseline_g.json").read_text(encoding="utf-8"))
+    check(sum(len(v) for v in rep["groups"].values()) == 13 and "体裁" in r.stderr and rep["warnings"],
+          f"replicate 体裁分组 + 小组告警（{ {k: len(v) for k, v in rep['groups'].items()} }）")
+    check(main_bl.get("genre") == rep["main_genre"] and main_bl["n_docs"] == len(rep["groups"][rep["main_genre"]]),
+          f"主基线只用主体裁篇目（{rep['main_genre']} {main_bl['n_docs']} 篇）")
+    check("跨体裁" in r.stderr, "回测：生成文体裁与基线不同且无同体裁基线 → 显式告警")
+    persona = json.loads((og / "persona_g.json").read_text(encoding="utf-8"))
+    check(persona.get("genre", {}).get("genre") == rep["main_genre"] and persona["analysis_only"] == rep["analysis_only"],
+          "人设卡记录体裁与 analysis_only")
+    # 闸门：太小（3 篇三种体裁）→ analysis_only
+    tiny = tmp / "tiny"
+    tiny.mkdir()
+    for f in sorted(a_dir.glob("*.txt"))[:3]:
+        shutil.copy(f, tiny / f.name)
+    for k in samples:
+        shutil.copy(gdir / f"{k}.txt", tiny / f"z_{k}.txt")
+    r = run([sys.executable, SCRIPT_DIR / "replicate.py", "--name", "t", "--corpus-dir", tiny, "--out-dir",
+             tmp / "out_tiny", "--min-docs", "4"])
+    pt = json.loads((tmp / "out_tiny" / "persona_t.json").read_text(encoding="utf-8"))
+    mdt = (tmp / "out_tiny" / "三件套人设卡_t.md").read_text(encoding="utf-8")
+    check(pt["analysis_only"] and "analysis_only" in mdt and "analysis_only" in r.stderr,
+          "体裁组过小/混杂 → 人设卡 analysis_only + 显式告警")
+    # 基线缓存：同输入复用
+    r = run([sys.executable, SCRIPT_DIR / "replicate.py", "--name", "g", "--corpus-dir", mix, "--out-dir", og])
+    check("复用" in r.stdout, "基线 input_hash 未变 → 复用")
+    # 指纹缓存
+    f0 = sorted(a_dir.glob("*.txt"))[0]
+    o1 = run([sys.executable, ex, f0, "--json"]).stdout
+    o2 = run([sys.executable, ex, f0, "--json", "--no-cache"]).stdout
+    check(json.loads(o1) == json.loads(o2) and any((tmp / "cache" / "fp").rglob("*.json")),
+          "指纹缓存：命中结果与 --no-cache 重算一致")
+    # LLM 缓存：同请求第二次不再 429 重试
+    c2 = dict(MOCK, WENBI_CACHE_DIR=str(tmp / "cache_llm"))
+    r1 = run([sys.executable, WFP_SCRIPTS / "score_metaphor.py", f0, "--json"], env=c2)
+    r2 = run([sys.executable, WFP_SCRIPTS / "score_metaphor.py", f0, "--json"], env=c2)
+    check("[retry]" in r1.stderr and "[retry]" not in r2.stderr and json.loads(r1.stdout) == json.loads(r2.stdout),
+          "LLM 内容哈希缓存：第二次命中（无重试、结果一致）")
+    r3 = run([sys.executable, WFP_SCRIPTS / "score_metaphor.py", f0, "--json"], env=dict(c2, WENBI_NO_CACHE="1"))
+    check("[retry]" in r3.stderr, "WENBI_NO_CACHE=1 关闭缓存")
+    # ruler：隐喻 extend + learn + score
+    fpa, fpb, md = tmp / "r_fpa", tmp / "r_fpb", tmp / "r_meta"
+    for d in (fpa, fpb, md):
+        d.mkdir()
+    for f in sorted(a_dir.glob("*.txt")):
+        (fpa / f"{f.stem}.json").write_text(run([sys.executable, ex, f, "--json"]).stdout, encoding="utf-8")
+        run([sys.executable, WFP_SCRIPTS / "score_metaphor.py", f, "--out", md / f"{f.stem}.json"], env=MOCK)
+    for f in sorted(b_dir.glob("*.txt")):
+        (fpb / f"{f.stem}.json").write_text(run([sys.executable, ex, f, "--json"]).stdout, encoding="utf-8")
+        run([sys.executable, WFP_SCRIPTS / "score_metaphor.py", f, "--out", md / f"{f.stem}.json"], env=MOCK)
+    rul = WFP_SCRIPTS / "ruler.py"
+    ebl = tmp / "bl_ext.json"
+    run([sys.executable, rul, "extend", "--baseline", bl_path, "--metaphor-dir", md, "--out", ebl])
+    check("L4_LLM_meta_per_k" in json.loads(ebl.read_text(encoding="utf-8")).get("extra", {}),
+          "ruler extend：LLM 隐喻密度并入基线（metaphor 进 Delta）")
+    wj = tmp / "w.json"
+    run([sys.executable, rul, "learn", "--baseline", ebl, "--pos", fpa, "--neg", fpb, "--length-fps", fpa,
+         "--metaphor-dir", md, "--out", wj])
+    w = json.loads(wj.read_text(encoding="utf-8"))
+    pri = sum(field_map.weight(k) for k in w["features"] if not k.startswith("L3::") and k != "L4_LLM_meta_per_k")
+    check(w["layers"] and all(v["weight"] > 0 for v in w["features"].values()) and pri > 0,
+          f"ruler learn：分层权重（{ {k: v['weight_share'] for k, v in w['layers'].items()} }），只降权不删特征")
+    sc = json.loads(run([sys.executable, rul, "score", fpb, "--baseline", ebl, "--weights", wj,
+                         "--metaphor-dir", md, "--json"]).stdout)
+    check(sc and sc[0]["composite"] is not None and "L4" in sc[0]["layers"] and "L1_SYN" in sc[0]["layers"],
+          "ruler score：综合分 + 分层分（含 L4 隐喻）")
+    held, ctrl = sorted(a_dir.glob("*.txt"))[0], sorted(b_dir.glob("*.txt"))[0]
+    vw = json.loads(run([sys.executable, WFP_SCRIPTS / "validate_discrimination.py", "--baseline", bl_path,
+                         "--held-out", held, "--control", ctrl, "--weights", wj, "--json"]).stdout)
+    check(vw.get("ratio") is not None, f"validate_discrimination --weights（学习权重综合分，判别比 {vw.get('ratio')}）")
+    # 盲测尺
+    bt = json.loads(run([sys.executable, WFP_SCRIPTS / "blind_test.py", "--reference", a_dir, "--real", held,
+                         "--fake", ctrl, "--json"], env=MOCK).stdout)
+    p0 = bt["pairs"][0]
+    check(bt["n_ok"] == 1 and len(p0["picks"]) == 2 and held.stem not in p0["refs"],
+          f"LLM 盲测尺（mock）：正反两序 + 参考片段排除被测真文（P(识破)={bt['mean_p_real']}）")
+    # 闭环
+    lo = tmp / "loop"
+    persona_md = next((tmp / "out").glob("三件套人设卡_*.md"))
+    r = run([sys.executable, SCRIPT_DIR / "closed_loop.py", "--persona-md", persona_md, "--baseline", bl_path,
+             "--task", "写一篇谈读书的短文", "--out-dir", lo, "--rounds", "5", "--weights", wj,
+             "--blind-reference", a_dir], env=MOCK)
+    lr = json.loads((lo / "loop_report.json").read_text(encoding="utf-8"))
+    comps = [h["composite"] for h in lr["rounds"]]
+    check(len(lr["rounds"]) == 3 and "上限" in r.stderr, f"closed_loop：--rounds 5 截到 3 轮（逐轮综合分 {comps}）")
+    check(lr["best_composite"] == min(comps) and (lo / "best.txt").read_text(encoding="utf-8")
+          == (lo / f"round_{lr['best_round']}.txt").read_text(encoding="utf-8"), "closed_loop：保留最佳轮")
+    p2 = (lo / "round_2_prompt.txt").read_text(encoding="utf-8")
+    check("偏离最大的层" in p2 and "原作者约" in p2 and "L1_" not in p2.split("【上一稿文风偏差")[-1],
+          "closed_loop：分层偏差以中文标签回灌 prompt")
+    check(all(h["layers"] for h in lr["rounds"]) and lr.get("blind_test", {}).get("mean_p_detect") is not None
+          and (lo / "loop_report.md").exists(), "closed_loop：逐轮分层分数报告 + 盲测独立信号")
 
 
 if __name__ == "__main__":
