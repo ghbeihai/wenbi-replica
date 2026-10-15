@@ -54,7 +54,16 @@ python3 scripts/replicate.py --name <对象key> --corpus-dir <原文目录> \
   --out-dir <输出目录> --backtest <生成文.txt>
 ```
 
-产出：`wfp_baseline_<key>.json`（硬指标基线）、`persona_<key>.json` + `三件套人设卡_<key>.md`（含生成指令模板）、生成文回测 Delta。
+产出：`wfp_baseline_<key>.json`（硬指标基线，主体裁）、`wfp_baseline_<key>__<体裁>.json`（每个够篇数的体裁一份）、
+`genre_report.json`（体裁分布与闸门）、`persona_<key>.json` + `三件套人设卡_<key>.md`（含生成指令模板）、生成文回测 Delta。
+
+**体裁闸门（默认 `--genre auto`）**：逐篇识别 讲稿/随笔/新闻/对话/诗歌/其他（规则；`--genre-llm` 对低置信篇再问 LLM）。
+主基线只用主体裁篇目；某体裁 < `--min-docs` 篇只做分析不建基线；主体裁占比 <60% 或没有够篇数的体裁 →
+人设卡标 **analysis_only（仅供分析）** 并显式告警，此时不要拿它生成/判冒名。回测与闭环自动选同体裁基线，找不到就告警"跨体裁不可靠"。
+`--genre off` 恢复旧行为（全部篇目一个基线）。
+
+**缓存**：指纹、LLM 调用、基线都按内容哈希缓存（`$WENBI_CACHE_DIR`，默认 `~/.cache/wenbi`；`WENBI_NO_CACHE=1` 关闭），
+未变的文本不重算（343 篇建基线：首次 3m13s → 复跑 25s）。
 
 ## 完整流程（五步）
 
@@ -68,7 +77,7 @@ python3 scripts/replicate.py --name <对象key> --corpus-dir <原文目录> \
 **所有脚本都在各自 toolkit 的 scripts/ 目录下，直接调用，不要自己拼格式。**
 
 - **WFP 硬指标基线**：`replicate.py` 自动完成（逐篇指纹 + `field_map.aggregate_baseline` 聚合，<5 篇非空原文直接报错）。
-  口径（field_map v3）：原始词 TTR 不进 Delta（随篇长下降，用 STTR）；我:你、正:负比值 +1 平滑；6 个句长相关特征共享权重。
+  口径（field_map v4；篇内句长 sd 为样本标准差，v3 基线需重建）：原始词 TTR 不进 Delta（随篇长下降，用 STTR）；我:你、正:负比值 +1 平滑；6 个句长相关特征共享权重。
 - **SPI 人格**（需 DeepSeek key，`spi-quant` 已安装）：
   ```bash
   spi-quant profile --file <文章.txt> --out <profile.json>     # 逐篇打分
@@ -122,6 +131,14 @@ python3 scripts/build_persona_generic.py --name <key> --display-name "人读名"
 2. **数值密度加 few-shot 体感**："正情 26/千字"这种数字 LLM 没概念，prompt 里抄 1-2 句原文当例子，让它对密度有体感。
 3. **短块语料回测跳过整体 Delta**：原文每篇 <500 字时，直接逐项对比关键指标（句长/正情密度/隐喻密度），报告里注明"语料偏短，Delta 参考意义有限"。
 
+**生成闭环（推荐，需 key）**：
+```bash
+python3 scripts/closed_loop.py --persona-md 三件套人设卡_<key>.md --baseline wfp_baseline_<key>.json \
+  --task "写一篇……，约 1000 字" --out-dir loop_out [--rounds 3] [--weights ruler_weights.json] [--blind-reference <原文目录>]
+```
+人设卡第四节指令 → 生成 → 多尺子打分 → 偏差最大的层/特征以中文"当前值/原作者值/增减方向"回灌 prompt → 再生成；
+最多 3 轮，保留综合分最低的一轮（`best.txt`），`loop_report.md` 列逐轮综合分与分层分；给 `--blind-reference` 时对最佳轮再做 LLM 盲测。
+
 ### ⑤ 指纹回测
 ```bash
 python3 $WFP_ROOT/scripts/extract_hard_metrics.py <生成文.txt> --json > gen_fp.json
@@ -150,6 +167,10 @@ python3 $WFP_ROOT/scripts/validate_discrimination.py --baseline <基线.json> \
 - 留出文若在基线的 `doc_ids` 里会被剔除（自己比自己没意义）；基线 <5 篇 / 可用特征 <10 / 空文本直接报错
 - 退出码：0 正常（结论看输出）、1 输入错误；加 `--strict` 时 FAIL 退出 2
 - **两关过不了，Delta 直接标"不可信"，不硬报数值**
+- **多尺子（推荐）**：自检后用 `$WFP_ROOT/scripts/ruler.py learn` 由留出 vs 对照/异作者的判别力学习分层权重
+  （不可判别或与篇长相关的特征自动降权，**只降不删**），`validate_discrimination.py --weights w.json` / `ruler.py score` 出综合分 + 分层分；
+  `ruler.py extend --metaphor-dir` 把 LLM 隐喻密度并入基线。报告里要写各层权重占比。
+- **LLM 盲测尺**（独立信号）：`$WFP_ROOT/scripts/blind_test.py --reference <原文目录> --real <真文> --fake <生成文>`，P(识破)≈0.5 表示以假乱真。
 - 生成文偏项迭代：`python3 scripts/iterative_generate.py --baseline <基线> --gen-fp gen_fp.json --original-prompt <prompt.txt> --round 1`（修正要求用中文标签与增减方向）
 
 ## 交付报告必须包含的内容（不能自由发挥）

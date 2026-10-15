@@ -67,6 +67,10 @@ python3 scripts/replicate.py --name alice \
 python3 scripts/replicate.py --name alice --wfp-baseline ./out/wfp_baseline_alice.json \
   --spi-clusters spi_cluster_all.json --aot-profiles people_profiles.json --aot-person 爱丽丝 \
   --l3-baseline l3_baseline.json --out-dir ./out --backtest 生成文.txt
+
+# 6. 生成闭环（生成 → 多尺子打分 → 分层偏差回灌 → 再生成，≤3 轮，保留最佳）
+python3 scripts/closed_loop.py --persona-md ./out/三件套人设卡_alice.md \
+  --baseline ./out/wfp_baseline_alice.json --task "写一篇谈读书的短文，约 1000 字" --out-dir ./loop
 ```
 
 ---
@@ -77,7 +81,10 @@ python3 scripts/replicate.py --name alice --wfp-baseline ./out/wfp_baseline_alic
 |---|---|
 | `persona_<name>.json` | 结构化人设卡（程序消费） |
 | `三件套人设卡_<name>.md` | 人读版 + 可直接投喂的生成指令模板 |
-| `wfp_baseline_<name>.json` | 文风指纹基线（含 avg_chars、doc_ids、field_map_version） |
+| `wfp_baseline_<name>.json` | 文风指纹基线（主体裁；含 avg_chars、doc_ids、field_map_version、genre、input_hash） |
+| `wfp_baseline_<name>__<体裁>.json` | 每个达到最少篇数的体裁一份基线（回测/闭环自动选同体裁） |
+| `genre_report.json` | 逐篇体裁、分组、闸门状态（ok / mixed / analysis_only）与告警 |
+| `loop_out/` | `closed_loop.py`：逐轮生成文与指纹、`loop_report.{json,md}`、`best.txt` |
 | `fingerprints/` | 逐篇指纹 |
 | `_backtest_fp.json` | `--backtest` 时生成文指纹；Delta 打印在终端 |
 
