@@ -3,28 +3,53 @@ name: wenbi-replica
 description: 文笔复刻（Writing Style Replication）通用流水线：给定某人一批真实原文，产出该人风格的模仿文与可验证的画像报告。整合 SPI（人格底色，他是谁）、AoT（思维模式，他怎么想）、WFP（文风指纹，他怎么说）三个量化模块。当用户要求"复刻/模仿某人的文笔或写作风格""按 XX 的文风写一段""给一批文章仿写该作者风格""文笔复刻"时使用。也用于为自媒体账号、作家、KOL 建立可复用的文风画像卡。
 ---
 
-## ⚠️ 首次使用必查（agent 必读，加载本 skill 后第一件事）
+## ⚠️ 首次使用流程（agent 必读，加载本 skill 后第一件事）
 
-**在做任何分析之前，先逐项检查环境，缺哪项就主动提醒用户配置，不要直接开跑。**
+**先跑自检，再按提示一次性向用户列清所有缺失项，不要跑一步报一个错，也不要直接开跑。**
 
-1. **DeepSeek API Key**：检查环境变量 `DEEPSEEK_API_KEY` 是否已设置。
-   - 未设置 → **立即提醒用户**："文笔复刻需要 DeepSeek API Key 才能做人格/思维/隐喻打分（L3/L4）。请到 https://platform.deepseek.com/ 创建 key，然后执行 `export DEEPSEEK_API_KEY=sk-...` 或写入 `.env` 文件。"
-   - 只有用户明确说"先跑最小闭环（仅句长/问句统计）"时，才允许在无 key 情况下跑 L1/L2 纯规则硬指标。
+```bash
+python3 scripts/wenbi.py doctor [--corpus-dir <原文目录>] [--out-dir <训练输出目录>]   # 不调 LLM、不显示 key
+```
+自检逐项报告 ✓/!/✗：三个 toolkit 路径、DeepSeek API Key、Python 依赖、SPI Personality Atlas、原文语料（篇数/字数/体裁）、
+训练产物；最后打印「下一步」。有 ✗ 时退出码 1。环境没装好先 `bash scripts/install.sh && source wenbi.env`。
 
-2. **三个 toolkit 路径**：检查 `SPI_ROOT`、`AOT_ROOT`、`WFP_ROOT` 三个环境变量是否指向对应 toolkit 根目录。
-   - 未设置 → 提醒用户："请设置三个 toolkit 的路径：`export SPI_ROOT=... AOT_ROOT=... WFP_ROOT=...`"
+### 第 1 步：提醒用户提供 DeepSeek API Key（缺 key 时）
+用中文这样提醒：
+> 文笔复刻要用 DeepSeek API Key 给人格、思维、文风软指标和隐喻打分，生成也要用它。
+> 请到 https://platform.deepseek.com/ → API Keys 创建一个 key，然后执行 `export DEEPSEEK_API_KEY=sk-...`，
+> 或在 wenbi-replica/.env 里写一行 `DEEPSEEK_API_KEY=sk-...`。（我不会显示或保存你的 key 内容。）
 
-3. **Python 依赖**：推荐直接 `bash scripts/install.sh`（自动建/用 venv，装齐 `jieba pyyaml numpy pandas scikit-learn openai python-dotenv` + `pip install -e $SPI_ROOT`，检查三个兄弟仓库，生成 `wenbi.env`，装完自检）。装完 `source wenbi.env`；离线冒烟：`python3 scripts/smoke_test.py`（不需要 key、不花钱）。
+只有用户明确说"先跑最小闭环（只要句长/问句这类统计）"时，才允许无 key 只跑 WFP L1/L2 纯规则硬指标。
 
-4. **SPI 的 Personality Atlas 数据仓库（必需，~1.1GB）**：检查 `$SPI_ROOT/assets/survey/results/spi_table.json` 是否存在。
-   - 不存在 → **提醒用户**："SPI 人格打分依赖 Personality Atlas 数据（约 1.1GB），首次使用需执行：`cd $SPI_ROOT/assets && git clone https://github.com/Wildertrek/survey.git`"
-   - 这是必需数据，不是可选对照；没有它 SPI 人格打分跑不了。
+### 第 2 步：请用户提供原文（缺语料时）
+> 请把你想复刻的那个人的原文发给我：
+> - 格式：.txt / .md（一篇一个文件，文件名就是篇目编号），或语料 JSON（`{"items":[{"id":..,"text":..}]}` 或 `{编号: 正文}`）；
+> - 数量：至少 5 篇才能建基线，建议 20 篇以上、每篇 300 字以上，越多越稳；
+> - 体裁：尽量是同一种体裁（比如全是讲课稿，或全是文章）。混在一起也能跑，但会按体裁分组，篇数少的体裁只做分析。
 
-5. **SPI 的 3072 维嵌入数据（可选，~879MB）**：只有 `--spi-mode local` / `spi-quant spi --mode local` 离线映射才需要；默认 LLM 判聚类不需要。需要时 `bash scripts/install.sh --with-local`。
+拿到原文后再跑一次 `doctor --corpus-dir`，把篇数、字数、体裁分布告诉用户；有告警（篇数少、体裁混杂）要明说。
 
-**只有上述 1-4 项齐备，才进入正式流水线。** 提醒时一次性列清所有缺失项，不要跑一步报一个错。
+### 第 3 步：训练（建基线 + 画像 + 人设卡）
+按下文「完整流程」①–③ 执行（`replicate.py`，完整版先跑 SPI/AoT/L3/L4）。
 
-**环境齐备后，立即主动问用户要对标文章**："环境已就绪。请提供你想复刻的那个人的原文（建议 20 篇以上、每篇 300 字以上，文件或链接均可），我会基于这批原文重新提取风格基线，然后生成模仿文。"
+### 第 4 步：训练完成后，先问清这次要写什么，再生成
+**不要直接生成。** 用中文问用户：
+> 训练完成了。生成前请告诉我这次要写什么：
+> 1. 用途/平台：口播稿 / 公众号文章 / 朋友圈 / 小红书图文 / 知乎回答 / 演讲稿 / 其他（你描述）；
+> 2. 字数：大约多少字；
+> 3. 题目或主题；
+> 4. 读者是谁（可选）；
+> 5. 语气、格式或其他要求（可选，比如要不要小标题、要不要 emoji 和话题标签）。
+> 预设只是可以改的模板，你写的要求优先。
+
+用户回答后用 `closed_loop.py --purpose ... --topic ... --length ... [--audience/--tone/--format-notes/--extra]` 生成（见 ④）。
+**作者风格只来自人设卡 + 闭环偏差，不要自己往 prompt 里加"口语化/少标点"之类的风格要求**；平台/用途的外在要求由用户决定。
+
+### 其他环境项
+- 三个 toolkit 路径 `SPI_ROOT` / `AOT_ROOT` / `WFP_ROOT`：install.sh 生成 `wenbi.env`，`source` 即可。
+- SPI Personality Atlas（必需，约 1.1GB）：`cd $SPI_ROOT/assets && git clone https://github.com/Wildertrek/survey.git`。
+- SPI 3072 维嵌入（可选，约 879MB）：只有 `--spi-mode local` 需要，`bash scripts/install.sh --with-local`。
+- 离线冒烟：`python3 scripts/smoke_test.py`（不需要 key、不花钱）。
 
 ---
 
@@ -120,24 +145,35 @@ python3 scripts/build_persona_generic.py --name <key> --display-name "人读名"
 `--people-baseline <块级基线.json> --people-key <key>`（可选）：篇章级基线缺某项硬指标时用块级值补齐（stderr 会列出补了哪些）。
 也可以一步到位：`replicate.py --name <key> --wfp-baseline <已有基线> --spi-clusters ... --aot-profiles ... --aot-person ... --l3-baseline ...`（无 `--corpus-dir` 时必须给 `--wfp-baseline`；L3 基线不能代替 WFP 基线）。
 
-### ④ 生成模仿文
-按人设卡"四、生成指令模板"投喂 LLM（DeepSeek/豆包/Claude 等均可）。生成要求：
-- 目标字数 ≥800 字再回测（判别力，见 `references/limits.md` 第 5 条）；
-- 硬指标数值约束直接写进 prompt（句长/问句/语气词/隐喻/我:你 命中后 Delta 显著下降）；
-- 低分维度要写"少用"设锚；软特征用负向锚 + 中低位目标值，避免顶格过冲（`references/limits.md` 第五节）。
+### ④ 生成模仿文（先问清用途/平台、字数、题目）
+生成配置由用户在生成时决定（命令行 > `--gen-config` 配置文件 > 用途预设）：
 
-**生成 prompt 的 3 条经验（跨平台通用）**：
-1. **低数值特征必须显式写"少用"**：反问 0.2/篇、四字格 3.95/千字这类低值，不写"少用" LLM 默认往中间靠，会过量。写法：`修辞反问 ≤0.3 个/篇（少用）；四字格 ≤5 个/千字（不堆砌）`。
-2. **数值密度加 few-shot 体感**："正情 26/千字"这种数字 LLM 没概念，prompt 里抄 1-2 句原文当例子，让它对密度有体感。
-3. **短块语料回测跳过整体 Delta**：原文每篇 <500 字时，直接逐项对比关键指标（句长/正情密度/隐喻密度），报告里注明"语料偏短，Delta 参考意义有限"。
+| 字段 | 参数 | 说明 |
+|---|---|---|
+| 用途/平台 | `--purpose` | 预设：口播稿 / 公众号文章 / 朋友圈 / 小红书图文 / 知乎回答 / 演讲稿 / custom（`config/purpose_presets.yaml`，可编辑） |
+| 题目 | `--topic` | 必填（或用 `--extra`/`--task` 自由描述） |
+| 字数 | `--length` | 不给则用预设默认 |
+| 读者 / 语气 / 格式 | `--audience` `--tone` `--format-notes` | 用户自填，覆盖预设 |
+| 其他要求 | `--extra` | 自由文本，优先级最高 |
+| 可选格式 | `--with-optional-format` | 例如小红书 emoji/话题标签，只有用户想要才开 |
+| 只报告不强制的特征 | `--relax <特征键>` | 预设已为各平台列出与平台形态冲突的特征（如公众号的标点密度） |
+
+- few-shot：`--corpus-dir <原文目录>` 自动从作者本人原文挑 3 段（`--fewshot N`），优先与用途相近的体裁、与题目相关的段落。
+- 预览拼出来的写作要求：`python3 scripts/gen_spec.py --purpose 公众号文章 --topic ... --corpus-dir ...`；列预设：`python3 scripts/wenbi.py presets`。
+- 也可以按人设卡"四、生成指令模板"手动投喂任意 LLM；目标字数 ≥800 字再回测（`references/limits.md` 第 5 条）。
 
 **生成闭环（推荐，需 key）**：
 ```bash
 python3 scripts/closed_loop.py --persona-md 三件套人设卡_<key>.md --baseline wfp_baseline_<key>.json \
-  --task "写一篇……，约 1000 字" --out-dir loop_out [--rounds 3] [--weights ruler_weights.json] [--blind-reference <原文目录>]
+  --corpus-dir <原文目录> --purpose 公众号文章 --topic "……" --length 1500 --out-dir loop_out \
+  [--rounds 3] [--weights ruler_weights.json] [--l3-baseline l3_baseline.json] [--blind-reference <原文目录>]
 ```
-人设卡第四节指令 → 生成 → 多尺子打分 → 偏差最大的层/特征以中文"当前值/原作者值/增减方向"回灌 prompt → 再生成；
-最多 3 轮，保留综合分最低的一轮（`best.txt`），`loop_report.md` 列逐轮综合分与分层分；给 `--blind-reference` 时对最佳轮再做 LLM 盲测。
+人设卡第四节指令 + 用户写作要求 → 生成 → 多尺子打分 → 偏差最大的层/特征以中文"当前值/原作者值/增减方向"回灌 → 再生成；
+最多 3 轮，保留综合分最低的一轮（`best.txt`），`loop_report.md` 列逐轮综合分与分层分。
+- `--l3-baseline`：每轮做 L3 软评分（17 维 × 2 次调用），L3 偏差也进回灌。
+- 与所选平台形态冲突的特征（预设 relax，如公众号的标点密度、句长起伏）：偏差照常报告，但**不写进修正指令**，报告里单列说明。
+- 用途对应的体裁与作者基线体裁不同时：有同体裁基线就自动改用；没有就按主体裁打分，报告注明。
+- 给 `--blind-reference` 时对最佳轮再做 LLM 盲测。
 
 ### ⑤ 指纹回测
 ```bash

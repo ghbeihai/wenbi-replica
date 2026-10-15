@@ -357,6 +357,11 @@ def main():
         run_backtest(args.backtest, bl, out_dir, genre=args.genre, genre_llm=args.genre_llm)
 
     print(f"\n完成。产物目录：{out_dir}")
+    if not args.backtest:
+        print("\n训练已完成。生成前请确定这次要写什么（用途/平台、字数、题目，可选读者与其他要求）：\n"
+              "  预设：口播稿 / 公众号文章 / 朋友圈 / 小红书图文 / 知乎回答 / 演讲稿 / custom（python3 scripts/wenbi.py presets）\n"
+              f"  python3 scripts/closed_loop.py --persona-md {out_dir}/三件套人设卡_{args.name}.md "
+              f"--baseline {bl} --corpus-dir <原文目录> --purpose <用途> --topic <题目> --length <字数> --out-dir <输出目录>")
 
 
 if __name__ == "__main__":

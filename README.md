@@ -57,6 +57,9 @@ git clone https://github.com/ghbeihai/wfp-toolkit.git
 cd wenbi-replica && bash scripts/install.sh
 source wenbi.env
 python3 scripts/smoke_test.py      # 离线冒烟测试（mock LLM，不需要 key）
+python3 scripts/wenbi.py doctor --corpus-dir ./alice_原文   # 自检：key / toolkit / 依赖 / 原文篇数与体裁 / 下一步
+#   需要：DeepSeek API Key（https://platform.deepseek.com/，export DEEPSEEK_API_KEY=sk-... 或写进 .env）
+#         要复刻的那个人的原文（.txt/.md 一篇一文件或语料 JSON；建议 ≥20 篇、每篇 ≥300 字、尽量同一体裁）
 
 # 4. 最小闭环（仅 WFP 硬指标，不调 LLM）
 python3 scripts/replicate.py --name alice \
@@ -68,9 +71,11 @@ python3 scripts/replicate.py --name alice --wfp-baseline ./out/wfp_baseline_alic
   --spi-clusters spi_cluster_all.json --aot-profiles people_profiles.json --aot-person 爱丽丝 \
   --l3-baseline l3_baseline.json --out-dir ./out --backtest 生成文.txt
 
-# 6. 生成闭环（生成 → 多尺子打分 → 分层偏差回灌 → 再生成，≤3 轮，保留最佳）
+# 6. 训练完成后先定 用途/平台、字数、题目（预设：python3 scripts/wenbi.py presets），再闭环生成
+#    （生成 → 多尺子打分 → 分层偏差回灌 → 再生成，≤3 轮，保留最佳；与平台形态冲突的偏差只报告不强制改）
 python3 scripts/closed_loop.py --persona-md ./out/三件套人设卡_alice.md \
-  --baseline ./out/wfp_baseline_alice.json --task "写一篇谈读书的短文，约 1000 字" --out-dir ./loop
+  --baseline ./out/wfp_baseline_alice.json --corpus-dir ./alice_原文 \
+  --purpose 公众号文章 --topic "谈读书" --length 1500 [--audience ..] [--tone ..] [--extra ..] --out-dir ./loop
 ```
 
 ---
@@ -84,6 +89,7 @@ python3 scripts/closed_loop.py --persona-md ./out/三件套人设卡_alice.md \
 | `wfp_baseline_<name>.json` | 文风指纹基线（主体裁；含 avg_chars、doc_ids、field_map_version、genre、input_hash） |
 | `wfp_baseline_<name>__<体裁>.json` | 每个达到最少篇数的体裁一份基线（回测/闭环自动选同体裁） |
 | `genre_report.json` | 逐篇体裁、分组、闸门状态（ok / mixed / analysis_only）与告警 |
+| `config/purpose_presets.yaml` | 用途/平台预设（可编辑模板：默认字数、格式、few-shot 优先体裁、只报告不强制的特征） |
 | `loop_out/` | `closed_loop.py`：逐轮生成文与指纹、`loop_report.{json,md}`、`best.txt` |
 | `fingerprints/` | 逐篇指纹 |
 | `_backtest_fp.json` | `--backtest` 时生成文指纹；Delta 打印在终端 |

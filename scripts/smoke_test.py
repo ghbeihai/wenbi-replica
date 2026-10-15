@@ -478,6 +478,74 @@ def _v3opt(tmp: Path, a_dir: Path, b_dir: Path, bl_path: Path):
     mm = [h["round"] for h in lgr["rounds"] if h["genre_mismatch"] and h["round"] < 3]
     check(same_ruler and mm and "体裁偏离" in (lg / f"round_{mm[0] + 1}_prompt.txt").read_text(encoding="utf-8"),
           "closed_loop：体裁偏离时仍用目标基线打分（逐轮可比）并回灌体裁修正")
+    _gen_config(tmp, a_dir, bl_path, persona_md)
+
+
+def _gen_config(tmp: Path, a_dir: Path, bl_path: Path, persona_md: Path):
+    sys.path.insert(0, str(WFP_SCRIPTS))
+    import genre as genre_mod
+    # 1. 优先级：预设 < 配置文件 < 命令行；可选格式默认不加
+    gc = tmp / "gen.yaml"
+    gc.write_text("purpose: 小红书图文\nlength: 900\ntone: 配置里的语气\n", encoding="utf-8")
+    t = run([sys.executable, SCRIPT_DIR / "gen_spec.py", "--gen-config", gc, "--topic", "维生素怎么吃",
+             "--tone", "命令行的语气", "--extra", "不要提品牌"]).stdout
+    check("约 900 字" in t and "命令行的语气" in t and "配置里的语气" not in t and "不要提品牌" in t
+          and "小红书图文" in t and "话题标签" not in t, "生成配置：预设 < 配置文件 < 命令行，可选格式默认不加")
+    t2 = run([sys.executable, SCRIPT_DIR / "gen_spec.py", "--purpose", "小红书图文", "--topic", "x",
+              "--with-optional-format"]).stdout
+    check("话题标签" in t2 and "约 600 字" in t2, "生成配置：--with-optional-format 才加 emoji/话题标签；预设默认字数")
+    run([sys.executable, SCRIPT_DIR / "gen_spec.py", "--purpose", "不存在的平台", "--topic", "x"], expect_rc=1)
+    run([sys.executable, SCRIPT_DIR / "closed_loop.py", "--persona-md", persona_md, "--baseline", bl_path,
+         "--out-dir", tmp / "x_loop"], expect_rc=1, env=MOCK)
+    ok("生成配置：未知预设、没给题目 → 报错提示先定用途/字数/题目")
+    p = run([sys.executable, SCRIPT_DIR / "wenbi.py", "presets"]).stdout
+    check(all(k in p for k in ("口播稿", "公众号文章", "朋友圈", "小红书图文", "知乎回答", "演讲稿")), "wenbi.py presets 列出用途预设")
+    # 2. 闭环：公众号 + L3 回灌 + relax + few-shot 体裁优先
+    l3bl = tmp / "l3_mock_bl.json"
+    lp = tmp / "loop_purpose"
+    run([sys.executable, SCRIPT_DIR / "closed_loop.py", "--persona-md", persona_md, "--baseline", bl_path,
+         "--corpus-dir", a_dir, "--purpose", "公众号文章", "--topic", "谈读书", "--length", "800",
+         "--l3-baseline", l3bl, "--out-dir", lp], env=MOCK)
+    rep = json.loads((lp / "loop_report.json").read_text(encoding="utf-8"))
+    check(rep["spec"]["purpose"] == "公众号文章" and "公众号文章" in (lp / "round_1_prompt.txt").read_text(encoding="utf-8"),
+          "closed_loop：写作要求（用途/题目/字数）进 prompt 与报告")
+    check(all(h["l3_scored"] and "L3" in h["layers"] for h in rep["rounds"]), "closed_loop：每轮 L3 软评分进分层打分")
+    l3fb = any(f["feature"].startswith("L3::") for h in rep["rounds"] for f in h["feedback"])
+    check(l3fb or all(h["layers"]["L3"]["score"] < 1.0 for h in rep["rounds"]),
+          "closed_loop：L3 偏差进回灌（有显著偏差时）")
+    leaked = []
+    for h in rep["rounds"][:-1]:
+        nxt = (lp / f"round_{h['round'] + 1}_prompt.txt").read_text(encoding="utf-8").split("【上一稿文风偏差")[-1]
+        leaked += [f["label"] for f in h["feedback"] if f.get("relaxed") and f["label"] in nxt]
+    n_rel = sum(len(h["relaxed_deviations"]) for h in rep["rounds"])
+    md = (lp / "loop_report.md").read_text(encoding="utf-8")
+    check(not leaked and set(rep["relaxed_features"]) >= {"L1_SYN_003_punct_per_k_total"}
+          and (n_rel == 0 or "只报告不强制修正" in md),
+          f"closed_loop：与平台冲突的偏差只报告不回灌（本次 {n_rel} 条，泄漏 {leaked}）")
+    gs = [genre_mod.classify_rule((a_dir / f"{d}.txt").read_text(encoding="utf-8"))["genre"] for d in rep["fewshot"]]
+    check(len(rep["fewshot"]) == 3 and gs[:2] == ["essay", "essay"],
+          f"few-shot 取自作者原文且优先用途体裁（{list(zip(rep['fewshot'], gs))}）")
+    # 3. doctor：缺 key → ✗ + 退出 1；有 key 不显示内容；训练完成后提示问用途
+    nok = dict(ENV, WENBI_ENV_FILE="/nonexistent")
+    r = run([sys.executable, SCRIPT_DIR / "doctor.py"], expect_rc=1, env=nok)
+    check("✗ DEEPSEEK_API_KEY" in r.stdout and "platform.deepseek.com" in r.stdout and "请提供要复刻" in r.stdout,
+          "doctor：缺 key / 缺语料时中文提醒（怎么设 key、原文格式与数量）")
+    fake = "sk-smoke-NOT-A-REAL-KEY-123"
+    r = subprocess.run([sys.executable, SCRIPT_DIR / "doctor.py", "--corpus-dir", a_dir, "--out-dir", tmp / "out",
+                        "--json"], capture_output=True, text=True, env=dict(nok, DEEPSEEK_API_KEY=fake))
+    d = json.loads(r.stdout)
+    key = [i for i in d["items"] if i["item"] == "DEEPSEEK_API_KEY"][0]
+    check(key["level"] == "ok" and fake not in r.stdout and d["stage"] == "ready_to_generate"
+          and "用途/平台" in d["next"] and "字数" in d["next"], "doctor：key 不回显；训练完成后提示先问用途/平台、字数、题目")
+    one = tmp / "doc_few"
+    one.mkdir()
+    shutil.copy(sorted(a_dir.glob("*.txt"))[0], one)
+    r = run([sys.executable, SCRIPT_DIR / "wenbi.py", "doctor", "--corpus-dir", one, "--json"], expect_rc=1,
+            env=dict(nok, DEEPSEEK_API_KEY=fake))
+    check(json.loads(r.stdout)["stage"] == "need_corpus", "doctor：语料不足 5 篇 → 阻塞并提示补原文")
+    r = run([sys.executable, SCRIPT_DIR / "replicate.py", "--name", "nx", "--corpus-dir", a_dir, "--out-dir", tmp / "out_nx",
+             "--genre", "off"])
+    check("生成前请确定" in r.stdout and "--purpose" in r.stdout, "replicate 训练完成后提示用户确定用途/字数/题目")
 
 
 if __name__ == "__main__":

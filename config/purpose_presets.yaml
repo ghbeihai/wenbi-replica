@@ -1,0 +1,55 @@
+# 生成用途预设（可编辑模板，不是强制规则）
+# 用法：closed_loop.py --purpose <键>；用户在命令行/生成配置里给的字段一律覆盖这里的同名字段。
+# 字段：
+#   name          人读名
+#   genre_pref    few-shot 优先从作者哪类体裁的原文里挑（lecture/essay/news/dialogue/poetry/other）
+#   length        默认字数（用户 --length 覆盖）
+#   format_notes  默认格式说明（尽量克制；用户 --format-notes 覆盖）
+#   optional_notes 可选格式（如 emoji/话题标签），只有用户加 --with-optional-format 才写进 prompt
+#   relax         与该平台形态天然冲突的特征：偏差照常报告，但不写进修正指令（不强制改）
+# 注意：这里不写作者风格（那来自人设卡 + 闭环偏差），只写平台/用途的外在要求。
+presets:
+  口播稿:
+    name: 口播稿 / 视频文案
+    genre_pref: lecture
+    length: 1200
+    format_notes: 按说话顺序成段，适合朗读
+    relax: []
+  公众号文章:
+    name: 公众号文章
+    genre_pref: essay
+    length: 2000
+    format_notes: 段落分明，可有小标题（用户不需要可去掉）
+    relax: [L1_SYN_003_punct_per_k_total, L1_SYN_002_sd_sl, L1_SYN_007_burstiness]
+  朋友圈:
+    name: 朋友圈
+    genre_pref: essay
+    length: 200
+    format_notes: 短，一到三段
+    optional_notes: 可在结尾加 1-2 个 emoji
+    relax: [L1_SYN_003_punct_per_k_total, L2_DIS_002_conn_per_k_total, L1_SYN_002_sd_sl, L1_SYN_007_burstiness]
+  小红书图文:
+    name: 小红书图文
+    genre_pref: essay
+    length: 600
+    format_notes: 短段落，每段 1-3 句
+    optional_notes: "适度使用 emoji 分段；文末 3-5 个 #话题标签"
+    relax: [L1_SYN_003_punct_per_k_total, L1_SYN_002_sd_sl, L1_SYN_007_burstiness, L2_DIS_002_conn_per_k_total]
+  知乎回答:
+    name: 知乎回答
+    genre_pref: essay
+    length: 1500
+    format_notes: 先给结论再展开
+    relax: [L1_SYN_003_punct_per_k_total]
+  演讲稿:
+    name: 演讲稿
+    genre_pref: lecture
+    length: 1500
+    format_notes: 开场、主体、收尾层次清楚，适合现场讲
+    relax: []
+  custom:
+    name: 自定义
+    genre_pref: ""
+    length: 1000
+    format_notes: ""
+    relax: []
