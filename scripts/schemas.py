@@ -36,21 +36,34 @@ L3_BASELINE_SCHEMA = {
 }
 
 
-def validate(data: Any, schema: dict, name: str) -> None:
-    """校验数据是否符合 schema，不符合直接报错退出。"""
-    errors = []
+def _num(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
 
-    # 顶层必填字段
+
+def check(data: Any, schema: dict) -> list:
+    """返回错误列表（全量逐项检查，不只抽前几项）。"""
+    errors = []
+    if not schema.get("is_dict") and not isinstance(data, dict):
+        return [f"顶层应为对象，实际是 {type(data).__name__}"]
+
     for field in schema.get("required_top", []):
         if field not in data:
             errors.append(f"缺顶层字段 '{field}'")
 
-    # 基线类型
     if "baseline_type" in schema and "baseline" in data:
-        if not isinstance(data["baseline"], schema["baseline_type"]):
-            errors.append(f"baseline 字段类型应该是 {schema['baseline_type'].__name__}，实际是 {type(data['baseline']).__name__}")
+        bl = data["baseline"]
+        if not isinstance(bl, schema["baseline_type"]):
+            errors.append(f"baseline 字段类型应该是 {schema['baseline_type'].__name__}，实际是 {type(bl).__name__}")
+        elif not bl:
+            errors.append("baseline 为空")
+        else:
+            for k, v in bl.items():
+                if not isinstance(v, dict) or not _num(v.get("mean")) or not _num(v.get("sd")):
+                    errors.append(f"baseline['{k}'] 应为 {{mean: 数值, sd: 数值, ...}}")
+                    if len(errors) > 20:
+                        errors.append("……（错误过多，已截断）")
+                        break
 
-    # cluster_summary 类型
     if "cluster_summary_type" in schema and "cluster_summary" in data:
         cs = data["cluster_summary"]
         if not isinstance(cs, schema["cluster_summary_type"]):
@@ -58,35 +71,47 @@ def validate(data: Any, schema: dict, name: str) -> None:
         elif not cs:
             errors.append("cluster_summary 为空")
         else:
-            # 每项必须有指定字段
             required = schema.get("cluster_item_fields", [])
-            for i, item in enumerate(cs[:3]):
+            for i, item in enumerate(cs):
                 if not isinstance(item, dict):
                     errors.append(f"cluster_summary[{i}] 不是字典")
                     continue
                 for f in required:
                     if f not in item:
                         errors.append(f"cluster_summary[{i}] 缺字段 '{f}'")
+                for f in ("n_first", "n_top5", "avg_relevance"):
+                    if f in item and not _num(item[f]):
+                        errors.append(f"cluster_summary[{i}].{f} 应为数值")
 
-    # AoT 人物画像
     if schema.get("is_dict"):
         if not isinstance(data, dict):
             errors.append("数据应该是字典 {pid: profile}")
         elif not data:
             errors.append("人物画像为空")
         else:
-            for pid, profile in list(data.items())[:2]:
+            for pid, profile in data.items():
+                if not isinstance(profile, dict):
+                    errors.append(f"{pid} 应为对象")
+                    continue
                 for f in schema.get("person_fields", []):
                     if f not in profile:
                         errors.append(f"{pid} 缺字段 '{f}'")
-                # top5 每项校验
                 top5 = profile.get("top5", [])
-                if isinstance(top5, list):
-                    for i, item in enumerate(top5[:2]):
-                        for f in schema.get("top5_item_fields", []):
-                            if f not in item:
-                                errors.append(f"{pid}.top5[{i}] 缺字段 '{f}'")
+                if not isinstance(top5, list) or not top5:
+                    errors.append(f"{pid}.top5 应为非空列表")
+                    continue
+                for i, item in enumerate(top5):
+                    for f in schema.get("top5_item_fields", []):
+                        if f not in item:
+                            errors.append(f"{pid}.top5[{i}] 缺字段 '{f}'")
+                    if "mean" in item and not (_num(item["mean"]) and 1 <= item["mean"] <= 7):
+                        errors.append(f"{pid}.top5[{i}].mean 应为 1-7 数值")
+    return errors
 
+
+def validate(data: Any, schema: dict, name: str) -> None:
+    """校验数据是否符合 schema，不符合直接报错退出。"""
+    errors = check(data, schema)
     if errors:
         print(f"\n[{name}] schema 校验失败：", file=sys.stderr)
         for e in errors:
